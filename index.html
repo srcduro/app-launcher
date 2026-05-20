@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -408,11 +409,11 @@
       <img src="" alt="Duroply" id="login-logo-img">
     </div>
     <h1>APP LAUNCHER</h1>
-    <p class="subtitle">Enter your credentials to continue</p>
+    <p class="subtitle">Sign in with your Duroply Supabase account</p>
 
     <div class="login-form" autocomplete="off">
       <div class="form-group">
-        <input type="text" id="login-user" autocomplete="off" placeholder="Username">
+        <input type="email" id="login-user" autocomplete="username" placeholder="Email">
       </div>
       <div class="form-group">
         <input type="password" id="login-pwd" autocomplete="new-password" placeholder="Password">
@@ -537,25 +538,39 @@ const SUPABASE_KEY    = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYm
 const SUPABASE_SCHEMA = 'DUROPLY';
 const APPS_TABLE      = 'launcher_apps';   // ← create in DUROPLY schema (see SQL below)
 
-// Built-in users (request: two pre-set accounts, no Supabase Auth required)
-const BUILTIN_USERS = {
-  admin: { password: 'admin123', name: 'Admin', role: 'admin' },
-  user:  { password: 'user123',  name: 'User',  role: 'user'  }
-};
+// Authentication: Supabase Auth (same backend as Duroply_Sales_MIS_Dashboard).
+// Users must exist in Supabase Auth, and have a matching profile row in
+// DUROPLY.user_profiles (keyed by auth_id). Admins are identified by
+// role === 'admin' on their profile row. No passwords are stored in this HTML.
 
-const SESSION_KEY        = 'launcher_session';
-const LOCAL_FALLBACK_KEY = 'launcher_apps_local';
+const SESSION_KEY            = 'launcher_session';
+const LOCAL_FALLBACK_KEY     = 'launcher_apps_local';
+// Key used to hand off credentials to apps launched in a new tab
+// (e.g. Duroply_Sales_MIS_Dashboard.html). Written by launchApp() just before
+// window.open(), read+deleted by the destination page during its init.
+const AUTH_HANDOFF_KEY       = 'duroply_auth_handoff';
 
 // ════════════════════════════════════════════════════════════════
 // STATE
 // ════════════════════════════════════════════════════════════════
 
-let _sbClient    = null;
-let _cloudReady  = false;
-let _currentUser = null;
-let apps         = [];
-let editingId    = null;
-let currentTab   = 'paste';
+let _sbClient     = null;  // DATA client — stays on the anon role for all
+                           //   reads/writes to DUROPLY.launcher_apps and
+                           //   DUROPLY.launcher_tabs. Same behaviour as
+                           //   before Supabase Auth was introduced, so the
+                           //   existing RLS policies (anon SELECT/INSERT/…)
+                           //   continue to work unchanged.
+let _sbAuthClient = null;  // AUTH client — used ONLY for signInWithPassword()
+                           //   and the user_profiles lookup. Kept separate so
+                           //   the user's JWT never leaks onto the data
+                           //   client's queries, which would change the
+                           //   effective role from anon to authenticated and
+                           //   could trigger different (empty) RLS results.
+let _cloudReady   = false;
+let _currentUser  = null;
+let apps          = [];
+let editingId     = null;
+let currentTab    = 'paste';
 
 // ════════════════════════════════════════════════════════════════
 // SUPABASE CLIENT
@@ -573,6 +588,30 @@ function buildSupabaseClient(){
     });
   } catch(e){
     console.error('Failed to build Supabase client', e);
+    return null;
+  }
+}
+
+// Build a SECOND Supabase client used exclusively for authentication
+// (signInWithPassword) and reading the user_profiles row. We keep this
+// instance distinct from _sbClient so that the user's JWT never gets
+// attached to data queries against launcher_apps / launcher_tabs — those
+// tables should be hit with the anon role exactly as they always were.
+function buildSupabaseAuthClient(){
+  if(typeof window.supabase==='undefined' || !window.supabase.createClient){
+    return null;
+  }
+  try {
+    return window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+      db: { schema: SUPABASE_SCHEMA },
+      // We DO want a session in memory here so the user_profiles SELECT
+      // that follows signInWithPassword() carries the JWT (in case
+      // user_profiles is RLS-gated by auth.uid()). persistSession stays
+      // false so the session does not survive a tab/browser close.
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+    });
+  } catch(e){
+    console.error('Failed to build Supabase auth client', e);
     return null;
   }
 }
@@ -822,36 +861,121 @@ function tabLabel(id){ const t = tabs.find(x => x.id === id); return t ? t.label
 // ════════════════════════════════════════════════════════════════
 
 async function doLogin(){
-  const u = document.getElementById('login-user').value.trim().toLowerCase();
-  const p = document.getElementById('login-pwd').value;
-  const errEl = document.getElementById('login-err');
+  const emailRaw = document.getElementById('login-user').value.trim();
+  const pwd      = document.getElementById('login-pwd').value;
+  const errEl    = document.getElementById('login-err');
   errEl.textContent = '';
+  errEl.style.color = '';
 
-  if(!u || !p){ errEl.textContent = 'Please enter username and password.'; return; }
-
-  const acct = BUILTIN_USERS[u];
-  if(!acct || acct.password !== p){
-    errEl.textContent = 'Invalid username or password.';
+  if(!emailRaw || !pwd){
+    errEl.textContent = 'Please enter email and password.';
+    return;
+  }
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw)){
+    errEl.textContent = 'Please enter a valid email address.';
+    return;
+  }
+  // Lazily build the auth-only client. Kept separate from _sbClient so the
+  // user's JWT never gets attached to data queries (launcher_apps /
+  // launcher_tabs), which would change the effective Postgres role from
+  // anon to authenticated and could trigger different RLS results.
+  if(!_sbAuthClient) _sbAuthClient = buildSupabaseAuthClient();
+  if(!_sbAuthClient){
+    errEl.textContent = 'Supabase is not available. Please refresh the page.';
     return;
   }
 
-  _currentUser = { id: u, name: acct.name, role: acct.role };
-  // Session is intentionally NOT persisted — every page load must show
-  // the login screen, even after a browser restart or tab reload.
+  const btn = document.getElementById('login-btn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Signing in…'; }
+  errEl.textContent = '⏳ Signing in…';
+  errEl.style.color = '#94a3b8';
 
-  document.getElementById('login-screen').classList.add('hidden');
-  applyRoleVisibility();
-  updateUserChip();
-  await loadTabs();
-  await loadApps();
-  renderTabBar();
-  render();
+  try {
+    // 1) Authenticate against Supabase Auth (same backend as Duroply_Sales_MIS_Dashboard.html).
+    //    Uses the dedicated auth client so the data client (_sbClient) keeps
+    //    talking to launcher_apps / launcher_tabs as anon, preserving the
+    //    original load behaviour.
+    const { data: authData, error: authErr } = await _sbAuthClient.auth.signInWithPassword({
+      email:    emailRaw.toLowerCase(),
+      password: pwd
+    });
+    if(authErr || !authData || !authData.user){
+      errEl.textContent = 'Invalid email or password.';
+      errEl.style.color = '';
+      return;
+    }
+
+    // 2) Pull the matching profile row from DUROPLY.user_profiles.
+    const { data: profile, error: profErr } = await _sbAuthClient
+      .from('user_profiles')
+      .select('id,name,role,branches,branch')
+      .eq('auth_id', authData.user.id)
+      .maybeSingle();
+
+    if(profErr){
+      errEl.textContent = 'Could not load user profile: ' + describeSbError(profErr);
+      errEl.style.color = '';
+      try { await _sbAuthClient.auth.signOut(); } catch(_){}
+      return;
+    }
+    if(!profile){
+      errEl.textContent = 'This account has no profile in DUROPLY.user_profiles. Contact an administrator.';
+      errEl.style.color = '';
+      try { await _sbAuthClient.auth.signOut(); } catch(_){}
+      return;
+    }
+
+    // 3) Build the runtime user object. We keep id/name/role so the launcher's
+    //    existing role-based UI (admin-only buttons, tab editing, etc.) keeps
+    //    working. We also stash the email + password so we can hand them off
+    //    to apps that need to sign in to the same Supabase Auth (the Dashboard).
+    _currentUser = {
+      auth_id : authData.user.id,
+      id      : profile.id,
+      name    : profile.name || authData.user.email,
+      role    : profile.role || 'user',
+      branches: Array.isArray(profile.branches) ? profile.branches.slice() : ['ALL'],
+      branch  : profile.branch || 'ALL',
+      email   : authData.user.email,
+      // NOTE: password is kept in memory only (not persisted) so launchApp()
+      // can pass it to apps that open in a new tab and need to auth themselves.
+      _pwd    : pwd
+    };
+
+    document.getElementById('login-screen').classList.add('hidden');
+    errEl.textContent = '';
+    errEl.style.color = '';
+    applyRoleVisibility();
+    updateUserChip();
+    // NOTE: We deliberately do NOT re-probe the cloud here, and we keep
+    // using _sbClient (the anon data client) for loadTabs()/loadApps().
+    // This preserves the exact behaviour the launcher had before Supabase
+    // Auth was introduced — same role, same RLS path, same rows.
+    await loadTabs();
+    await loadApps();
+    renderTabBar();
+    render();
+  } catch(err){
+    errEl.textContent = 'Sign-in failed: ' + (err && err.message ? err.message : err);
+    errEl.style.color = '';
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = 'LOG IN'; }
+  }
 }
 
-function doLogout(){
+async function doLogout(){
+  // Sign out of Supabase Auth on the auth-only client so the next login
+  // starts from a clean slate. The data client (_sbClient) was never
+  // authenticated in the first place, so there's nothing to sign out of there.
+  if(_sbAuthClient){
+    try { await _sbAuthClient.auth.signOut(); }
+    catch(err){ console.warn('[LOGOUT] auth.signOut failed:', err); }
+  }
   _currentUser = null;
   // Wipe any stale session from previous versions of this app
   try { sessionStorage.removeItem(SESSION_KEY); localStorage.removeItem(SESSION_KEY); } catch(e){}
+  // Clear any pending auth handoff (no orphan creds for the next user)
+  try { localStorage.removeItem(AUTH_HANDOFF_KEY); } catch(e){}
   document.getElementById('login-user').value = '';
   document.getElementById('login-pwd').value = '';
   document.getElementById('login-err').textContent = '';
@@ -1135,23 +1259,99 @@ async function deleteApp(id){
 function launchApp(id){
   const app = apps.find(a => a.id === id);
   if(!app) return;
-  document.getElementById('app-view-title').textContent = app.icon + '  ' + app.name;
-  const frame = document.getElementById('app-frame');
-  if(app.type === 'url'){
-    frame.removeAttribute('srcdoc');
-    frame.src = app.content;
-  } else {
-    frame.removeAttribute('src');
-    frame.srcdoc = app.content;
+
+  // Write a one-shot auth handoff to localStorage so the destination page
+  // (e.g. Duroply_Sales_MIS_Dashboard.html) can auto-login without prompting
+  // the user again. The destination is responsible for deleting this key
+  // immediately after reading it (it's intentionally short-lived).
+  //
+  // localStorage is used (not sessionStorage) because sessionStorage is NOT
+  // shared between independent tabs, even on the same origin. The handoff
+  // is timestamped so a stale entry from a previous launch is ignored.
+  try {
+    if(_currentUser && _currentUser.email && _currentUser._pwd){
+      const handoff = {
+        email: _currentUser.email,
+        pwd:   _currentUser._pwd,
+        ts:    Date.now()
+      };
+      localStorage.setItem(AUTH_HANDOFF_KEY, JSON.stringify(handoff));
+    }
+  } catch(e){ /* non-fatal — destination will just show its own login screen */ }
+
+  // Build the window features string that nudges the browser to open a
+  // real, separate window (chrome-less popup with its own taskbar entry)
+  // rather than a new tab in the same window. We size it generously and
+  // let the user resize as needed. Independent windows are required because
+  // some app features (notably Excel/PDF downloads triggered by client-side
+  // libraries) misbehave inside an in-page iframe sandbox or when a tab is
+  // a strict child of the launcher tab.
+  //
+  // We deliberately do NOT include "noopener" here. With noopener,
+  // window.open() returns null in modern browsers — which is
+  // indistinguishable from a popup-blocked return, making it impossible
+  // to tell the user when their browser blocked the launch. The URL apps
+  // are admin-curated trusted destinations, so the modest security
+  // benefit of noopener is outweighed by the reliability of detecting
+  // popup blocks.
+  function _launcherWindowFeatures(){
+    const w = Math.max(900,  Math.min(1600, Math.floor((screen.availWidth  || 1280) * 0.9)));
+    const h = Math.max(600,  Math.min(1000, Math.floor((screen.availHeight || 800)  * 0.9)));
+    // Centre on the primary screen for a tidy first appearance.
+    const left = Math.max(0, Math.floor(((screen.availWidth  || 1280) - w) / 2));
+    const top  = Math.max(0, Math.floor(((screen.availHeight || 800)  - h) / 2));
+    return 'popup=yes,width=' + w + ',height=' + h + ',left=' + left + ',top=' + top
+         + ',resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no';
   }
-  document.getElementById('app-view').classList.add('active');
+
+  const features = _launcherWindowFeatures();
+
+  if(app.type === 'url'){
+    // URL apps open in their own window. This sidesteps X-Frame-Options /
+    // frame-ancestors restrictions on external sites that refuse to load
+    // inside an iframe, and avoids the in-page iframe context that breaks
+    // client-side downloads (Excel/PDF/CSV exports from the launched app).
+    const w = window.open(app.content, '_blank', features);
+    if(!w){
+      alert('Your browser blocked the new window for "' + app.name +
+            '". Please allow popups for this site, or open the link manually:\n\n' +
+            app.content);
+    }
+    return;
+  }
+
+  // HTML-content apps (raw HTML stored with the app) used to render inside
+  // the in-page iframe. They now also open in a separate window so client-
+  // side downloads (XLSX/PDF/CSV) work the same way they do in a standalone
+  // tab. We can't pass an HTML string to window.open() directly, so we open
+  // about:blank, then write the HTML into the new document.
+  const win = window.open('about:blank', '_blank', features);
+  if(!win){
+    alert('Your browser blocked the new window for "' + app.name + '". Please allow popups for this site.');
+    return;
+  }
+  try {
+    win.document.open();
+    win.document.write(app.content || '');
+    win.document.close();
+    // Best-effort title; the HTML's own <title> wins once the document parses.
+    try { win.document.title = app.name; } catch(_){}
+  } catch(e){
+    alert('Could not load "' + app.name + '" in a new window: ' + (e && e.message ? e.message : e));
+  }
 }
 
 function closeApp(){
+  // Kept for backwards compatibility with any leftover "Back to launcher"
+  // calls — the in-page iframe view is no longer used because every app
+  // now opens in its own window. This just hides the (now-unused) iframe
+  // panel if something somewhere still triggers it.
   document.getElementById('app-view').classList.remove('active');
   const frame = document.getElementById('app-frame');
-  frame.removeAttribute('src');
-  frame.removeAttribute('srcdoc');
+  if(frame){
+    frame.removeAttribute('src');
+    frame.removeAttribute('srcdoc');
+  }
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1261,6 +1461,10 @@ async function init(){
   try {
     sessionStorage.removeItem(SESSION_KEY);
     localStorage.removeItem(SESSION_KEY);
+    // Also clear any stale auth handoff (which is single-use anyway, but
+    // belt-and-braces in case a previous launch was aborted before the
+    // destination tab consumed it).
+    localStorage.removeItem(AUTH_HANDOFF_KEY);
   } catch(e){}
 
   document.getElementById('login-user').focus();
