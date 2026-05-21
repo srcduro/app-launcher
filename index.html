@@ -1533,27 +1533,39 @@ function launchApp(id){
     // screen.availWidth/availHeight reports the usable area excluding
     // the OS taskbar/dock. Fall back to sensible defaults if either
     // isn't reported by the browser.
+    // V148: also request the window come up at top-left and at the
+    // largest size the browser will honour. Most browsers cap window.open
+    // sizing at availWidth/availHeight, which is exactly what we want.
     const w = (screen && screen.availWidth)  ? screen.availWidth  : 1280;
     const h = (screen && screen.availHeight) ? screen.availHeight : 800;
-    return 'popup=yes,width=' + w + ',height=' + h + ',left=0,top=0'
-         + ',resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no';
+    return 'popup=yes,width=' + w + ',height=' + h + ',left=0,top=0,screenX=0,screenY=0'
+         + ',resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no,fullscreen=yes';
   }
 
   const features = _launcherWindowFeatures();
 
-  // Belt-and-braces "maximize" helper. Some browsers ignore size hints in
-  // the features string, so we follow up with moveTo(0,0)+resizeTo(...)
-  // once the window is open. Both calls are wrapped in try/catch because
-  // they can throw on cross-origin windows in some browsers — which is
-  // harmless: the initial features string is still in effect.
+  // Belt-and-braces "maximize" helper. Browsers don't expose a true
+  // window.maximize() to JavaScript, so the best we can do is fill the
+  // entire available screen area (everything except the OS taskbar/dock).
+  // We retry a few times because some browsers snap the popup back to a
+  // default size after the first paint of about:blank or after the new
+  // document loads, and the second pass catches that.
   function _tryMaximize(win){
     if(!win) return;
-    try { win.moveTo(0, 0); } catch(_){}
-    try {
-      const w = (screen && screen.availWidth)  ? screen.availWidth  : 1280;
-      const h = (screen && screen.availHeight) ? screen.availHeight : 800;
-      win.resizeTo(w, h);
-    } catch(_){}
+    function _doResize(){
+      try { win.moveTo(0, 0); } catch(_){}
+      try {
+        const w = (screen && screen.availWidth)  ? screen.availWidth  : 1280;
+        const h = (screen && screen.availHeight) ? screen.availHeight : 800;
+        win.resizeTo(w, h);
+      } catch(_){}
+    }
+    // Immediate attempt, then re-apply at 50ms, 250ms, and 800ms to defeat
+    // browsers that resize the window back to a default after layout.
+    _doResize();
+    setTimeout(_doResize,  50);
+    setTimeout(_doResize, 250);
+    setTimeout(_doResize, 800);
   }
 
   if(app.type === 'url'){
