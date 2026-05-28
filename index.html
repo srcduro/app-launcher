@@ -1431,6 +1431,14 @@ async function saveApp(){
     content = document.getElementById('app-url').value.trim();
     type = 'url';
     if(!content){ alert('Please enter a URL.'); return; }
+    // Auto-prepend https:// if the user entered a bare hostname like
+    // "duroticket.cloud" or "www.example.com". Without a scheme,
+    // window.open() interprets the string as a path relative to the
+    // launcher's own URL, which 404s. We allow http:// and other valid
+    // schemes (mailto:, tel:, etc.) to pass through unchanged.
+    if(!/^[a-z][a-z0-9+.-]*:/i.test(content) && !content.startsWith('//')){
+      content = 'https://' + content;
+    }
   } else if(currentTab === 'upload'){
     const fileInput = document.getElementById('app-file');
     if(!fileInput.files[0] && !editingId){
@@ -1573,11 +1581,20 @@ function launchApp(id){
     // frame-ancestors restrictions on external sites that refuse to load
     // inside an iframe, and avoids the in-page iframe context that breaks
     // client-side downloads (Excel/PDF/CSV exports from the launched app).
-    const w = window.open(app.content, '_blank', features);
+    //
+    // Safety net for legacy entries: if the stored URL is missing a scheme
+    // (e.g. "duroticket.cloud"), window.open() would treat it as a path
+    // relative to THIS launcher's URL and 404. Auto-prepend https:// in
+    // that case so old data still launches without needing to be re-saved.
+    let targetUrl = (app.content || '').trim();
+    if(targetUrl && !/^[a-z][a-z0-9+.-]*:/i.test(targetUrl) && !targetUrl.startsWith('//')){
+      targetUrl = 'https://' + targetUrl;
+    }
+    const w = window.open(targetUrl, '_blank', features);
     if(!w){
       alert('Your browser blocked the new window for "' + app.name +
             '". Please allow popups for this site, or open the link manually:\n\n' +
-            app.content);
+            targetUrl);
       return;
     }
     _tryMaximize(w);
