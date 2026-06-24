@@ -766,6 +766,84 @@ async function probeCloud(){
 // APP STORAGE (Supabase first, localStorage fallback)
 // ════════════════════════════════════════════════════════════════
 
+// Per-user app visibility.
+//   null  → unrestricted (admins and "grants_all" super-users see every app)
+//   Set   → the exact app IDs this user is allowed to VIEW
+// Populated at login by loadEffectiveAppAccess(). render() consults it so a
+// user only sees the dashboards/applications an Admin granted them.
+let _viewableAppIds = null;
+
+// Permission bit for "View" — must match the PERMS table in the Admin module
+// (View:1, Create:2, Edit:4, …). An app is visible if its effective grant
+// has this bit set.
+const PERM_VIEW = 1;
+
+// Compute which apps the current user may view, combining every source the
+// Admin tab writes to:
+//   • role.grants_all          → all apps (super_user)
+//   • dept_app_access          → inherited from the user's department
+//   • role_app_access          → inherited from the user's role
+//   • user_app_access          → granted to this user directly
+// Admins are unrestricted. Uses _sbAuthClient (the authenticated JWT) so the
+// same RLS policies the Admin tab relies on apply here too.
+async function loadEffectiveAppAccess(){
+  _viewableAppIds = null;  // default: see everything (overridden below)
+
+  if(!_currentUser) return;
+  // Admins manage everything and always see every app.
+  if(_currentUser.role === 'admin') return;
+
+  const c = (typeof _sbAuthClient !== 'undefined' && _sbAuthClient) ? _sbAuthClient : null;
+  if(!c){
+    // No authenticated client → cannot verify grants. Fail CLOSED (show nothing)
+    // rather than leaking every app. Better a blank grid than a privacy hole.
+    _viewableAppIds = new Set();
+    return;
+  }
+
+  try {
+    // If the user's role grants all access, they see everything.
+    if(_currentUser.role_id){
+      const { data: roleRow } = await c.from('roles')
+        .select('grants_all').eq('id', _currentUser.role_id).maybeSingle();
+      if(roleRow && roleRow.grants_all){ _viewableAppIds = null; return; }
+    }
+
+    // OR-together the perms from department, role and per-user grants.
+    const eff = {};  // app_id → combined perms bitmask
+    const merge = (rows, col) => (rows || []).forEach(r => {
+      if(r && r.app_id != null) eff[r.app_id] = (eff[r.app_id] || 0) | (r[col] || 0);
+    });
+
+    const queries = [];
+    if(_currentUser.department_id)
+      queries.push(c.from('dept_app_access').select('app_id,perms').eq('department_id', _currentUser.department_id));
+    if(_currentUser.role_id)
+      queries.push(c.from('role_app_access').select('app_id,perms').eq('role_id', _currentUser.role_id));
+    if(_currentUser.auth_id)
+      queries.push(c.from('user_app_access').select('app_id,perms_grant').eq('user_auth_id', _currentUser.auth_id));
+
+    const results = await Promise.all(queries);
+    // The first results (if present) are dept/role using 'perms'; the user one uses 'perms_grant'.
+    // Re-run the merge with the correct column per query by tagging each.
+    let qi = 0;
+    if(_currentUser.department_id){ merge(results[qi] && results[qi].data, 'perms'); qi++; }
+    if(_currentUser.role_id){       merge(results[qi] && results[qi].data, 'perms'); qi++; }
+    if(_currentUser.auth_id){       merge(results[qi] && results[qi].data, 'perms_grant'); qi++; }
+
+    // Keep only apps whose combined grant includes the View bit.
+    const viewable = new Set();
+    Object.keys(eff).forEach(appId => {
+      if((eff[appId] & PERM_VIEW) === PERM_VIEW) viewable.add(String(appId));
+    });
+    _viewableAppIds = viewable;
+  } catch(e){
+    // On error, fail closed so we never accidentally expose every app.
+    console.warn('[loadEffectiveAppAccess]', e);
+    _viewableAppIds = new Set();
+  }
+}
+
 async function loadAppsFromCloud(){
   if(!_cloudReady || !_sbClient) return null;
   try {
@@ -1138,7 +1216,7 @@ async function doVerifyOtp(){
     // Fetch the matching profile row (same query as the old password flow).
     const { data: profile, error: profErr } = await _sbAuthClient
       .from('user_profiles')
-      .select('id,name,role,branches,branch')
+      .select('id,name,role,branches,branch,department_id,role_id')
       .eq('auth_id', authData.user.id)
       .maybeSingle();
 
@@ -1163,6 +1241,8 @@ async function doVerifyOtp(){
       id           : profile.id,
       name         : profile.name || authData.user.email,
       role         : profile.role || 'user',
+      department_id: profile.department_id || null,
+      role_id      : profile.role_id || null,
       branches     : Array.isArray(profile.branches) ? profile.branches.slice() : ['ALL'],
       branch       : profile.branch || 'ALL',
       email        : authData.user.email,
@@ -1184,6 +1264,7 @@ async function doVerifyOtp(){
     // Auth was introduced — same role, same RLS path, same rows.
     await loadTabs();
     await loadApps();
+    await loadEffectiveAppAccess();
     renderTabBar();
     render();
 
@@ -1215,6 +1296,10 @@ async function doLogout(){
     catch(err){ console.warn('[LOGOUT] auth.signOut failed:', err); }
   }
   _currentUser = null;
+  // Reset access state and clear the in-memory app list so the next user
+  // never momentarily sees the previous user's apps before their grants load.
+  _viewableAppIds = new Set();
+  apps = [];
   // Wipe any stale session from previous versions of this app
   try { sessionStorage.removeItem(SESSION_KEY); localStorage.removeItem(SESSION_KEY); } catch(e){}
   // Clear any pending auth handoff (no orphan creds for the next user)
@@ -1375,17 +1460,24 @@ function render(){
   document.body.classList.remove('adm-active');
   if(av) av.style.display = 'none';
   grid.style.display = '';
-  const filtered = apps.filter(a => (a.tab || 'misc') === activeTab);
+
+  // Restrict to the apps this user is allowed to view. _viewableAppIds is null
+  // for admins / super-users (see everything); otherwise it's the granted set.
+  const visibleApps = (isAdmin || _viewableAppIds === null)
+    ? apps
+    : apps.filter(a => _viewableAppIds.has(String(a.id)));
+
+  const filtered = visibleApps.filter(a => (a.tab || 'misc') === activeTab);
 
   document.getElementById('subtitle').textContent =
-    apps.length === 0
-      ? (isAdmin ? 'Click + Add App to install your first application' : 'No apps available — ask an Admin to install some')
-      : `${apps.length} app${apps.length === 1 ? '' : 's'} installed across ${tabs.length} tab${tabs.length===1?'':'s'}`;
+    visibleApps.length === 0
+      ? (isAdmin ? 'Click + Add App to install your first application' : 'No apps available — ask an Admin to grant you access')
+      : `${visibleApps.length} app${visibleApps.length === 1 ? '' : 's'} available across ${tabs.length} tab${tabs.length===1?'':'s'}`;
 
   if(filtered.length === 0){
     grid.innerHTML = `<div class="empty">
       <p style="font-size:15px; margin-bottom:8px;">No apps in "${escapeHtml(tabLabel(activeTab))}"</p>
-      <p style="font-size:13px;">${isAdmin ? 'Click <strong>+ Add App</strong> — the new app will be filed under this tab.' : 'An Admin needs to add applications here.'}</p>
+      <p style="font-size:13px;">${isAdmin ? 'Click <strong>+ Add App</strong> — the new app will be filed under this tab.' : 'You don\u2019t have access to any apps in this tab.'}</p>
     </div>`;
     return;
   }
@@ -1558,6 +1650,15 @@ function launchApp(id){
   const app = apps.find(a => a.id === id);
   if(!app) return;
 
+  // Respect per-user access: non-admins can only launch apps they may view.
+  // (This is a UX guard, not real security — see the RLS note. The true
+  // enforcement must live in the database.)
+  const isAdmin = _currentUser && _currentUser.role === 'admin';
+  if(!isAdmin && _viewableAppIds !== null && !_viewableAppIds.has(String(id))){
+    alert('You don\u2019t have access to this application. Please contact an administrator.');
+    return;
+  }
+
   // Write a one-shot auth handoff to localStorage so the destination page
   // (e.g. Duroply_Sales_MIS_Dashboard.html) can auto-login without prompting
   // the user again. The destination is responsible for deleting this key
@@ -1726,6 +1827,7 @@ async function reloadFromCloud(){
     if(!_cloudReady) await probeCloud();
     await loadTabs();
     await loadApps();
+    await loadEffectiveAppAccess();
     renderTabBar();
     render();
   } finally {
