@@ -1265,6 +1265,9 @@ async function doVerifyOtp(){
     await loadTabs();
     await loadApps();
     await loadEffectiveAppAccess();
+    // Open on the first tab this user actually has access to (not the last
+    // tab used in this browser, and never the Admin module).
+    activeTab = firstAccessibleTab();
     renderTabBar();
     render();
 
@@ -1445,6 +1448,28 @@ async function manageTab(tabId){
   render();
 }
 
+// Apps the current user may view. Admins and "grants_all" super-users
+// (_viewableAppIds === null) see everything; everyone else sees only the
+// apps their grants allow.
+function getVisibleApps(){
+  const isAdmin = _currentUser && _currentUser.role === 'admin';
+  if(isAdmin || _viewableAppIds === null) return apps;
+  return apps.filter(a => _viewableAppIds.has(String(a.id)));
+}
+
+// The tab the launcher should open on after login: the first tab (in the
+// admin-defined order) that actually contains at least one app this user can
+// view. Falls back to the first tab, then 'misc', if nothing matches. This is
+// why a normal user lands on their first accessible dashboard tab instead of
+// whatever tab (or the Admin module) happened to be open last.
+function firstAccessibleTab(){
+  const visibleApps = getVisibleApps();
+  for(const t of tabs){
+    if(visibleApps.some(a => (a.tab || 'misc') === t.id)) return t.id;
+  }
+  return tabs[0] ? tabs[0].id : 'misc';
+}
+
 function render(){
   const grid = document.getElementById('app-grid');
   const isAdmin = _currentUser && _currentUser.role === 'admin';
@@ -1463,9 +1488,7 @@ function render(){
 
   // Restrict to the apps this user is allowed to view. _viewableAppIds is null
   // for admins / super-users (see everything); otherwise it's the granted set.
-  const visibleApps = (isAdmin || _viewableAppIds === null)
-    ? apps
-    : apps.filter(a => _viewableAppIds.has(String(a.id)));
+  const visibleApps = getVisibleApps();
 
   const filtered = visibleApps.filter(a => (a.tab || 'misc') === activeTab);
 
