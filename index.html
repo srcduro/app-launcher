@@ -429,6 +429,52 @@
     cursor: pointer;
   }
   .tab-bar .new-tab-btn:hover { background: rgba(255,255,255,0.55); color: #2c2c2a; }
+
+  /* ═══════════ ADMIN TAB (console embedded in the launcher) ═══════════ */
+  body.adm-active .app-only{display:none !important}
+  #admin-view{margin-top:4px}
+  .adm-nav{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:16px}
+  .adm-nav .grp{font-size:10px;font-weight:700;color:#888780;letter-spacing:.5px;text-transform:uppercase;margin:0 2px 0 10px}
+  .adm-nav .grp:first-child{margin-left:0}
+  .adm-nav button{font-size:13px;padding:7px 13px;border:1px solid #d3d1c7;background:#fff;border-radius:8px;font-weight:600;color:#2c2c2a;cursor:pointer;transition:all .15s}
+  .adm-nav button:hover{background:#f1efe8;border-color:#b4b2a9}
+  .adm-nav button.active{background:#2c2c2a;color:#fff;border-color:#2c2c2a}
+  .adm-panel{background:#fff;border:1px solid #d3d1c7;border-radius:12px;padding:22px}
+  .adm-panel h2{font-size:18px;font-weight:500;color:#1f3a5f;margin:0}
+  .adm-lede{font-size:13px;color:#5f5e5a;margin:5px 0 16px;line-height:1.6}
+  .adm-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+  .adm-bar .grow{flex:1;min-width:160px}
+  #admin-view input,#admin-view select{font-family:inherit;font-size:14px;padding:9px 11px;border:1px solid #d3d1c7;border-radius:8px;background:#fff;color:#2c2c2a;width:100%}
+  #admin-view input:focus,#admin-view select:focus{outline:none;border-color:#888780}
+  #admin-view table{width:100%;border-collapse:collapse;font-size:13px}
+  #admin-view th,#admin-view td{padding:9px 10px;text-align:left;border-bottom:1px solid #ece9dd;vertical-align:middle}
+  #admin-view th{font-size:10px;font-weight:700;color:#888780;letter-spacing:.4px;text-transform:uppercase}
+  #admin-view tr:last-child td{border-bottom:none}
+  .adm-status{font-size:11px;font-weight:700}
+  .adm-status.on{color:#2da44e}.adm-status.off{color:#9a9a93}
+  .adm-pgrid th,.adm-pgrid td{text-align:center;padding:7px 4px}
+  .adm-pgrid td.nm,.adm-pgrid th.nm{text-align:left;white-space:nowrap;font-weight:600}
+  .adm-pgrid input[type=checkbox]{width:16px;height:16px;accent-color:#2c2c2a;cursor:pointer}
+  .adm-scroll{max-height:440px;overflow:auto;border:1px solid #e6e3d8;border-radius:10px}
+  .adm-scroll table th{position:sticky;top:0;background:#faf8f0;z-index:1}
+  .adm-note{font-size:12px;color:#7a5e12;background:#fef9e7;border:1px solid #f3e3a8;border-radius:8px;padding:10px 12px;line-height:1.55;margin-bottom:14px}
+  .adm-fld{display:block;font-size:11px;font-weight:600;color:#444441;letter-spacing:.3px;text-transform:uppercase;margin:0 0 5px}
+  .adm-sel{max-height:240px;overflow:auto;border:1px solid #d3d1c7;border-radius:8px;padding:6px}
+  .adm-sel label{display:flex;align-items:center;gap:8px;padding:6px;border-radius:6px;font-size:13px;cursor:pointer}
+  .adm-sel label:hover{background:#f7f5ee}
+  .adm-sel input{width:auto}
+  .adm-check{display:flex;align-items:center;gap:8px;font-size:14px}
+  .adm-check input{width:auto}
+  #adm-modal{padding:0;width:560px;max-width:100%}
+  #adm-modal h2{font-size:18px;font-weight:500;color:#1f3a5f;padding:20px 22px 14px;margin:0}
+  #adm-modal .mbody{padding:0 22px 18px;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  #adm-modal .mbody .full{grid-column:1/3}
+  #adm-modal .mfoot{padding:14px 22px;border-top:1px solid #ece9dd;display:flex;justify-content:flex-end;gap:10px}
+  .role-badge.super_user{background:#1f3a5f}
+  .adm-toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#2c2c2a;color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;font-weight:600;z-index:3000;opacity:0;transition:opacity .2s;box-shadow:0 8px 24px rgba(0,0,0,.25);pointer-events:none}
+  .adm-toast.show{opacity:1}
+  .adm-toast.err{background:#a32d2d}
+  @media(max-width:720px){#adm-modal .mbody{grid-template-columns:1fr}#adm-modal .mbody .full{grid-column:1}}
 </style>
 </head>
 <body>
@@ -496,9 +542,9 @@
       <div class="toolbar">
         <button onclick="reloadFromCloud()" id="btn-sync" title="Re-fetch apps from Supabase">↻ Sync</button>
         <button onclick="exportApps()">⬇ Export</button>
-        <button onclick="document.getElementById('import-file').click()" class="admin-only">⬆ Import</button>
+        <button onclick="document.getElementById('import-file').click()" class="admin-only app-only">⬆ Import</button>
         <input type="file" id="import-file" accept=".json" style="display:none" onchange="importApps(event)">
-        <button class="primary admin-only" onclick="openAddModal()">+ Add App</button>
+        <button class="primary admin-only app-only" onclick="openAddModal()">+ Add App</button>
         <button onclick="doLogout()" class="danger">Sign out</button>
       </div>
     </div>
@@ -506,6 +552,7 @@
 
   <div class="tab-bar" id="tab-bar"></div>
   <div class="grid" id="app-grid"></div>
+  <div id="admin-view" style="display:none"></div>
 </div>
 
 <!-- ═══════════════════ ADD/EDIT MODAL ═══════════════════ -->
@@ -1234,7 +1281,7 @@ function colorForTabIndex(i){
 function renderTabBar(){
   const bar = document.getElementById('tab-bar');
   const isAdmin = _currentUser && _currentUser.role === 'admin';
-  if(!tabExists(activeTab)) activeTab = tabs[0] ? tabs[0].id : 'misc';
+  if(activeTab!=='__admin__' && !tabExists(activeTab)) activeTab = tabs[0] ? tabs[0].id : 'misc';
   bar.innerHTML = tabs.map((t, i) => {
     const cnt = apps.filter(a => (a.tab || 'misc') === t.id).length;
     const edit = isAdmin
@@ -1247,7 +1294,7 @@ function renderTabBar(){
       ${escapeHtml(t.label)} <span class="tab-count">(${cnt})</span>${edit}
     </button>`;
   }).join('') + (isAdmin
-    ? `<button class="new-tab-btn" onclick="addNewTab()">+ New tab</button>`
+    ? `<button class="tab-btn adm-tab ${activeTab==='__admin__'?'active':''}" style="--tab-color:#2c2c2a;" onclick="setActiveTab('__admin__')">⚙ Admin</button><button class="new-tab-btn" onclick="addNewTab()">+ New tab</button>`
     : '');
 }
 
@@ -1316,6 +1363,18 @@ async function manageTab(tabId){
 function render(){
   const grid = document.getElementById('app-grid');
   const isAdmin = _currentUser && _currentUser.role === 'admin';
+  const av = document.getElementById('admin-view');
+  if(activeTab === '__admin__'){
+    document.body.classList.add('adm-active');
+    grid.style.display = 'none';
+    if(av) av.style.display = 'block';
+    document.getElementById('subtitle').textContent = 'Administration · manage users, roles and access';
+    if(window.ADM) ADM.open();
+    return;
+  }
+  document.body.classList.remove('adm-active');
+  if(av) av.style.display = 'none';
+  grid.style.display = '';
   const filtered = apps.filter(a => (a.tab || 'misc') === activeTab);
 
   document.getElementById('subtitle').textContent =
@@ -1768,5 +1827,290 @@ async function init(){
 
 init();
 </script>
+<!-- Admin console modal + toast -->
+<div class="modal-overlay" id="adm-modal-ov"><div class="modal" id="adm-modal"></div></div>
+<div class="adm-toast" id="adm-toast"></div>
+
+<script>
+/* ════════════════════════════════════════════════════════════════════════
+   ADMIN CONSOLE — embedded under the launcher's "⚙ Admin" tab.
+   Reuses the launcher's authenticated session (_sbAuthClient + _currentUser)
+   and its already-loaded `apps` list. All admin writes go through the admin's
+   JWT, so the is_admin() RLS policies authorize them. Namespaced as window.ADM.
+   ════════════════════════════════════════════════════════════════════════ */
+(function(){
+  'use strict';
+  const PERMS=[{bit:1,ab:'V',label:'View'},{bit:2,ab:'C',label:'Create'},{bit:4,ab:'E',label:'Edit'},
+    {bit:8,ab:'D',label:'Delete'},{bit:16,ab:'X',label:'Export'},{bit:32,ab:'Ap',label:'Approve'},{bit:64,ab:'Ad',label:'Admin'}];
+  const ADM={ _built:false, _view:'users', _departments:[], _roles:[], _users:[], _accessIdx:null,
+              _uaOrig:{}, _bdOrig:{}, _brOrig:{} };
+  window.ADM=ADM;
+
+  // ── plumbing ──────────────────────────────────────────────────────────────
+  function C(){ return (typeof _sbAuthClient!=='undefined' && _sbAuthClient) ? _sbAuthClient : null; }
+  function me(){ return (typeof _currentUser!=='undefined') ? _currentUser : null; }
+  function appList(){ return (typeof apps!=='undefined' && Array.isArray(apps)) ? apps.filter(a=>a&&a.id) : []; }
+  function esc(s){ return (typeof escapeHtml==='function')?escapeHtml(s==null?'':String(s)):String(s==null?'':s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+  function toast(msg,err){ const t=document.getElementById('adm-toast'); if(!t)return; t.textContent=msg;
+    t.className='adm-toast show'+(err?' err':''); setTimeout(()=>t.className='adm-toast'+(err?' err':''),2600); }
+  function logAccess(type,details,appId){ const c=C(); if(!c)return; try{ c.rpc('log_access',{p_activity_type:type,p_details:details||null,p_app_id:appId||null}); }catch(_){} }
+  function deptName(id){ const d=ADM._departments.find(x=>x.id===id); return d?d.name:'—'; }
+  function roleName(id){ const r=ADM._roles.find(x=>x.id===id); return r?r.name:'—'; }
+  function roleById(id){ return ADM._roles.find(x=>x.id===id); }
+  function isUuid(s){ return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s||''); }
+  function deptOptions(sel){ return '<option value="">— department —</option>'+ADM._departments.map(d=>`<option value="${d.id}" ${d.id===sel?'selected':''}>${esc(d.name)}</option>`).join(''); }
+  function roleOptions(sel){ return '<option value="">— role —</option>'+ADM._roles.map(r=>`<option value="${r.id}" ${r.id===sel?'selected':''}>${esc(r.name)}</option>`).join(''); }
+  function permHeader(){ return '<th class="nm">Application</th>'+PERMS.map(p=>`<th title="${p.label}">${p.ab}</th>`).join(''); }
+  function permRow(app,grant,inherited){ const cells=PERMS.map(p=>{ const inh=(inherited&p.bit)===p.bit; const on=inh||((grant&p.bit)===p.bit);
+      return `<td><input type="checkbox" data-app="${esc(app.id)}" data-bit="${p.bit}" ${on?'checked':''} ${inh?'disabled title="inherited from department/role"':''}></td>`; }).join('');
+    return `<tr><td class="nm">${esc(app.icon||'📦')} ${esc(app.name)}</td>${cells}</tr>`; }
+  function collectGrid(sel){ const m={}; document.querySelectorAll(sel+' input[type=checkbox][data-app]').forEach(cb=>{ const id=cb.getAttribute('data-app'); const bit=+cb.getAttribute('data-bit')||0; if(!(id in m))m[id]=0; if(cb.checked&&!cb.disabled)m[id]|=bit; }); return m; }
+  function legacyRoleText(roleId){ const r=roleById(roleId); if(!r)return 'user'; if(r.code==='ADMIN')return 'admin'; if(r.grants_all)return 'super_user'; return 'user'; }
+  async function runOps(ops,onOk){ try{ const res=await Promise.all(ops); const bad=res.find(r=>r&&r.error); if(bad&&bad.error){ toast('Save failed: '+bad.error.message,true); return; } onOk&&onOk(); }catch(e){ toast('Save failed: '+(e.message||e),true); } }
+
+  // ── entry / nav ─────────────────────────────────────────────────────────--
+  ADM.open=async function(){
+    const host=document.getElementById('admin-view'); if(!host) return;
+    if(!ADM._built){
+      host.innerHTML='<div class="adm-nav" id="adm-nav"></div><div id="adm-main"></div>';
+      ADM._built=true;
+    }
+    if(!ADM._departments.length && !ADM._roles.length) await loadLookups();
+    ADM.show(ADM._view||'users');
+  };
+  function drawNav(){
+    const items=[['Users','users'],['User access','useraccess'],['By department','bydept'],['By role','byrole'],['Multiple users','byusers']];
+    document.getElementById('adm-nav').innerHTML=
+      '<span class="grp">User mgmt</span>'+
+      `<button class="${ADM._view==='users'?'active':''}" onclick="ADM.show('users')">Users</button>`+
+      '<span class="grp">Access</span>'+
+      `<button class="${ADM._view==='useraccess'?'active':''}" onclick="ADM.show('useraccess')">User access</button>`+
+      '<span class="grp">Bulk</span>'+
+      `<button class="${ADM._view==='bydept'?'active':''}" onclick="ADM.show('bydept')">By department</button>`+
+      `<button class="${ADM._view==='byrole'?'active':''}" onclick="ADM.show('byrole')">By role</button>`+
+      `<button class="${ADM._view==='byusers'?'active':''}" onclick="ADM.show('byusers')">Multiple users</button>`;
+  }
+  ADM.show=function(view){ ADM._view=view; drawNav();
+    if(view==='users') renderUsers();
+    else if(view==='useraccess') renderUserAccess();
+    else if(view==='bydept') renderByDept();
+    else if(view==='byrole') renderByRole();
+    else if(view==='byusers') renderByUsers();
+  };
+
+  // ── lookups & users ───────────────────────────────────────────────────────
+  async function loadLookups(){ const c=C(); if(!c)return;
+    const [d,r]=await Promise.all([
+      c.from('departments').select('id,code,name').eq('is_active',true).order('name'),
+      c.from('roles').select('id,code,name,level,grants_all').eq('is_active',true).order('level')]);
+    ADM._departments=(d.data)||[]; ADM._roles=(r.data)||[];
+    if(d.error||r.error) toast('Lookups failed — is uam_schema.sql deployed?',true);
+  }
+  async function loadUsers(){ const c=C(); if(!c){ADM._users=[];return;}
+    let cols='id,auth_id,name,email,role,branches,branch,department_id,role_id,is_active';
+    let res=await c.from('user_profiles').select(cols).order('name');
+    if(res.error){ cols='id,auth_id,name,role,branches,branch,department_id,role_id,is_active'; res=await c.from('user_profiles').select(cols).order('name'); }
+    if(res.error){ cols='id,auth_id,name,role,branches,branch'; res=await c.from('user_profiles').select(cols).order('name'); }
+    ADM._users=(res.data)||[];
+  }
+
+  async function renderUsers(){
+    const m=document.getElementById('adm-main');
+    m.innerHTML=`<div class="adm-panel"><h2>Users</h2>
+      <div class="adm-lede">Create and manage portal accounts, departments and roles. Sign-in is passwordless (one-time code) — this manages each user's profile and access.</div>
+      <div class="adm-note">A person must already exist in <strong>Supabase Auth</strong> before you add their profile here. Create them in the Supabase dashboard (Authentication → Users), copy their UUID, then use “Create user”.</div>
+      <div class="adm-bar"><div class="grow"><input id="adm-search" placeholder="Search name, email or department…" oninput="ADM.filterUsers()"></div>
+        <button class="primary" onclick="ADM.openUserForm('create')">Create user</button></div>
+      <div id="adm-utable"><div class="adm-lede">Loading users…</div></div></div>`;
+    await loadUsers(); drawUsers(ADM._users);
+  }
+  ADM.filterUsers=function(){ const q=(document.getElementById('adm-search').value||'').toLowerCase();
+    drawUsers(ADM._users.filter(u=>(u.name||'').toLowerCase().includes(q)||(u.email||'').toLowerCase().includes(q)||deptName(u.department_id).toLowerCase().includes(q))); };
+  function drawUsers(list){
+    const el=document.getElementById('adm-utable');
+    if(!list.length){ el.innerHTML='<div class="adm-lede">No users to show. If you expect to see others, enable the admin read policy on user_profiles (uam_schema.sql §7).</div>'; return; }
+    const rows=list.map(u=>{ const idx=ADM._users.indexOf(u); const active=u.is_active!==false;
+      const br=Array.isArray(u.branches)?(u.branches.includes('ALL')?'All branches':u.branches.join(', ')):(u.branch||'—');
+      const rn=roleName(u.role_id)!=='—'?roleName(u.role_id):(u.role||'user');
+      return `<tr><td><strong>${esc(u.name||'—')}</strong>${u.email?`<div style="font-size:11px;color:#888780">${esc(u.email)}</div>`:''}</td>
+        <td>${esc(deptName(u.department_id))}</td>
+        <td><span class="role-badge ${esc(u.role||'user')}">${esc(rn)}</span></td>
+        <td style="font-size:12px;color:#888780">${esc(br)}</td>
+        <td><span class="adm-status ${active?'on':'off'}">${active?'Active':'Disabled'}</span></td>
+        <td style="white-space:nowrap;text-align:right">
+          <button onclick="ADM.openUserForm('edit',${idx})">Edit</button>
+          <button class="${active?'danger':''}" onclick="ADM.toggleActive(${idx})">${active?'Disable':'Enable'}</button>
+          <button onclick="ADM.resetPassword(${idx})">Reset</button></td></tr>`; }).join('');
+    el.innerHTML=`<div class="adm-scroll"><table><thead><tr><th>Name</th><th>Department</th><th>Role</th><th>Branches</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+
+  function showModal(html){ const ov=document.getElementById('adm-modal-ov'); document.getElementById('adm-modal').innerHTML=html; ov.classList.add('active'); }
+  ADM.closeModal=function(){ document.getElementById('adm-modal-ov').classList.remove('active'); };
+  ADM.openUserForm=function(mode,idx){ const u=mode==='edit'?ADM._users[idx]:{};
+    const br=Array.isArray(u.branches)?u.branches.join(', '):(u.branch||'');
+    showModal(`<h2>${mode==='edit'?'Edit user':'Create user'}</h2>
+      <div class="mbody">
+        <div class="full"><label class="adm-fld">Auth user ID (UUID from Supabase Auth)</label>
+          <input id="adm-f-auth" value="${esc(u.auth_id||'')}" ${mode==='edit'?'readonly style="background:#f3f1ea"':''} placeholder="00000000-0000-0000-0000-000000000000">
+          <div class="hint">${mode==='edit'?'Linked Auth account; not editable.':'Paste the UUID of the already-created Auth user.'}</div></div>
+        <div><label class="adm-fld">Full name</label><input id="adm-f-name" value="${esc(u.name||'')}"></div>
+        <div><label class="adm-fld">Email</label><input id="adm-f-email" type="email" value="${esc(u.email||'')}"></div>
+        <div><label class="adm-fld">Department</label><select id="adm-f-dept">${deptOptions(u.department_id)}</select></div>
+        <div><label class="adm-fld">Role</label><select id="adm-f-role">${roleOptions(u.role_id)}</select></div>
+        <div class="full"><label class="adm-fld">Branches (comma separated, or ALL)</label><input id="adm-f-branches" value="${esc(br)}" placeholder="ALL"></div>
+        <div class="full adm-check"><input type="checkbox" id="adm-f-active" ${u.is_active!==false?'checked':''}><label for="adm-f-active">Account active</label></div>
+      </div>
+      <div class="mfoot"><button onclick="ADM.closeModal()">Cancel</button>
+        <button class="primary" onclick="ADM.saveUser('${mode}',${mode==='edit'?idx:'null'})">${mode==='edit'?'Save changes':'Create user'}</button></div>`);
+  };
+  ADM.saveUser=async function(mode,idx){ const c=C(); if(!c)return;
+    const authId=document.getElementById('adm-f-auth').value.trim();
+    const name=document.getElementById('adm-f-name').value.trim();
+    const email=document.getElementById('adm-f-email').value.trim();
+    const deptId=document.getElementById('adm-f-dept').value||null;
+    const roleId=document.getElementById('adm-f-role').value||null;
+    const active=document.getElementById('adm-f-active').checked;
+    let branches=document.getElementById('adm-f-branches').value.split(',').map(s=>s.trim()).filter(Boolean);
+    const r=roleById(roleId?+roleId:null); if(r&&r.grants_all)branches=['ALL']; if(!branches.length)branches=['ALL'];
+    if(!isUuid(authId)){ toast('Enter a valid Auth UUID.',true); return; }
+    if(!name){ toast('Name is required.',true); return; }
+    const row={ auth_id:authId, name, email:email||null, department_id:deptId?+deptId:null, role_id:roleId?+roleId:null,
+      role:legacyRoleText(roleId?+roleId:null), branches, branch:branches[0]||'ALL', is_active:active };
+    let res = mode==='edit' ? await c.from('user_profiles').update(row).eq('auth_id',authId)
+                            : await c.from('user_profiles').upsert(row,{onConflict:'auth_id'});
+    if(res.error && /email/.test(res.error.message)){ delete row.email;
+      res = mode==='edit' ? await c.from('user_profiles').update(row).eq('auth_id',authId)
+                          : await c.from('user_profiles').upsert(row,{onConflict:'auth_id'}); }
+    if(res.error){ toast('Save failed: '+res.error.message,true); return; }
+    logAccess('USER_'+(mode==='edit'?'EDIT':'CREATE'),{auth_id:authId,name});
+    ADM.closeModal(); await loadUsers(); drawUsers(ADM._users); toast(mode==='edit'?'User updated':'User created');
+  };
+  ADM.toggleActive=async function(idx){ const c=C(); const u=ADM._users[idx]; const next=!(u.is_active!==false);
+    const {error}=await c.from('user_profiles').update({is_active:next}).eq('auth_id',u.auth_id);
+    if(error){ toast('Failed: '+error.message,true); return; }
+    u.is_active=next; logAccess(next?'USER_ENABLE':'USER_DISABLE',{auth_id:u.auth_id}); drawUsers(ADM._users); toast(next?'User enabled':'User disabled'); };
+  ADM.resetPassword=async function(idx){ const c=C(); const u=ADM._users[idx]; let email=u.email;
+    if(!email){ email=prompt('No email on file. Enter this user’s email to send a reset:'); if(!email)return; }
+    try{ const {error}=await c.auth.resetPasswordForEmail(email.trim()); if(error){ toast('Could not send: '+error.message,true); return; }
+      logAccess('PASSWORD_RESET',{auth_id:u.auth_id,email}); toast('Reset email sent to '+email);
+    }catch(e){ toast('Could not send: '+(e.message||e),true); } };
+
+  // ── user access ─────────────────────────────────────────────────────────--
+  async function renderUserAccess(){ const m=document.getElementById('adm-main'); if(!ADM._users.length) await loadUsers();
+    const opts='<option value="">— choose a user —</option>'+ADM._users.map((u,i)=>`<option value="${i}" ${i===ADM._accessIdx?'selected':''}>${esc(u.name||u.email||u.auth_id)}</option>`).join('');
+    m.innerHTML=`<div class="adm-panel"><h2>User access</h2>
+      <div class="adm-lede">Grant one user access to specific dashboards and applications. Greyed, pre-ticked boxes are inherited from the user's department and role.</div>
+      <div class="adm-bar"><div class="grow"><select id="adm-ua-user" onchange="ADM.pickUser()">${opts}</select></div>
+        <button class="primary" id="adm-ua-save" style="display:none" onclick="ADM.saveUserAccess()">Save access</button></div>
+      <div id="adm-ua-body"></div></div>`;
+    if(ADM._accessIdx!=null && ADM._users[ADM._accessIdx]) drawUserAccess(ADM._users[ADM._accessIdx]);
+  }
+  ADM.pickUser=function(){ const v=document.getElementById('adm-ua-user').value; ADM._accessIdx=v===''?null:+v;
+    if(ADM._accessIdx==null){ document.getElementById('adm-ua-body').innerHTML=''; document.getElementById('adm-ua-save').style.display='none'; return; }
+    drawUserAccess(ADM._users[ADM._accessIdx]); };
+  async function drawUserAccess(u){ const c=C(); const body=document.getElementById('adm-ua-body'); body.innerHTML='<div class="adm-lede">Loading…</div>';
+    const r=roleById(u.role_id); const inherited={}; const grant={};
+    if(r&&r.grants_all){ appList().forEach(a=>inherited[a.id]=127); }
+    else{ const [dep,rol]=await Promise.all([
+        u.department_id?c.from('department_app_access').select('app_id,perms').eq('department_id',u.department_id):Promise.resolve({data:[]}),
+        u.role_id?c.from('role_app_access').select('app_id,perms').eq('role_id',u.role_id):Promise.resolve({data:[]})]);
+      (dep.data||[]).forEach(x=>inherited[x.app_id]=(inherited[x.app_id]||0)|x.perms);
+      (rol.data||[]).forEach(x=>inherited[x.app_id]=(inherited[x.app_id]||0)|x.perms); }
+    const ua=await c.from('user_app_access').select('app_id,perms_grant').eq('user_auth_id',u.auth_id);
+    (ua.data||[]).forEach(x=>grant[x.app_id]=x.perms_grant); ADM._uaOrig=Object.assign({},grant);
+    const rows=appList().map(a=>permRow(a,grant[a.id]||0,inherited[a.id]||0)).join('');
+    body.innerHTML=`<div class="adm-scroll"><table class="adm-pgrid"><thead><tr>${permHeader()}</tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="hint">Greyed boxes are already inherited. Tick the open boxes to grant extra permissions to this user only.</div>`;
+    document.getElementById('adm-ua-save').style.display='';
+  }
+  ADM.saveUserAccess=async function(){ const c=C(); const u=ADM._users[ADM._accessIdx]; if(!u)return;
+    const desired=collectGrid('#adm-ua-body'); const ops=[]; const keys=new Set([...Object.keys(desired),...Object.keys(ADM._uaOrig||{})]);
+    const cb=(_currentUser&&_currentUser.auth_id)||null;
+    keys.forEach(id=>{ const now=desired[id]||0, was=(ADM._uaOrig||{})[id]||0; if(now===was)return;
+      if(now>0) ops.push(c.from('user_app_access').upsert({user_auth_id:u.auth_id,app_id:id,perms_grant:now,created_by:cb},{onConflict:'user_auth_id,app_id'}));
+      else      ops.push(c.from('user_app_access').delete().eq('user_auth_id',u.auth_id).eq('app_id',id)); });
+    if(!ops.length){ toast('No changes to save'); return; }
+    await runOps(ops,()=>{ ADM._uaOrig=Object.assign({},desired); logAccess('PERM_CHANGE',{scope:'user',auth_id:u.auth_id,perms:desired}); toast('Access updated for '+(u.name||u.email)); });
+  };
+
+  // ── bulk: department ───────────────────────────────────────────────────────
+  async function renderByDept(){ const m=document.getElementById('adm-main');
+    const opts='<option value="">— choose a department —</option>'+ADM._departments.map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join('');
+    m.innerHTML=`<div class="adm-panel"><h2>Assign by department</h2>
+      <div class="adm-lede">Set the default dashboards, applications and permissions for a department. Every active user in it inherits these automatically.</div>
+      <div class="adm-bar"><div class="grow"><select id="adm-bd-dept" onchange="ADM.loadDeptGrid()">${opts}</select></div>
+        <button class="primary" id="adm-bd-save" style="display:none" onclick="ADM.saveDeptGrid()">Save grants</button></div>
+      <div id="adm-bd-body"></div></div>`; }
+  ADM.loadDeptGrid=async function(){ const c=C(); const id=document.getElementById('adm-bd-dept').value; const body=document.getElementById('adm-bd-body');
+    if(!id){ body.innerHTML=''; document.getElementById('adm-bd-save').style.display='none'; return; }
+    body.innerHTML='<div class="adm-lede">Loading…</div>';
+    const res=await c.from('department_app_access').select('app_id,perms').eq('department_id',+id); const cur={}; (res.data||[]).forEach(x=>cur[x.app_id]=x.perms);
+    ADM._bdOrig=Object.assign({},cur);
+    body.innerHTML=`<div class="adm-scroll"><table class="adm-pgrid"><thead><tr>${permHeader()}</tr></thead><tbody>${appList().map(a=>permRow(a,cur[a.id]||0,0)).join('')}</tbody></table></div>`;
+    document.getElementById('adm-bd-save').style.display=''; };
+  ADM.saveDeptGrid=async function(){ const c=C(); const id=+document.getElementById('adm-bd-dept').value; if(!id)return;
+    const desired=collectGrid('#adm-bd-body'); const ops=[]; const keys=new Set([...Object.keys(desired),...Object.keys(ADM._bdOrig||{})]);
+    keys.forEach(aid=>{ const now=desired[aid]||0, was=(ADM._bdOrig||{})[aid]||0; if(now===was)return;
+      if(now>0) ops.push(c.from('department_app_access').upsert({department_id:id,app_id:aid,perms:now},{onConflict:'department_id,app_id'}));
+      else      ops.push(c.from('department_app_access').delete().eq('department_id',id).eq('app_id',aid)); });
+    if(!ops.length){ toast('No changes to save'); return; }
+    await runOps(ops,()=>{ ADM._bdOrig=Object.assign({},desired); logAccess('PERM_CHANGE',{scope:'department',department_id:id,perms:desired}); toast('Department grants saved'); }); };
+
+  // ── bulk: role ─────────────────────────────────────────────────────────────
+  async function renderByRole(){ const m=document.getElementById('adm-main');
+    const opts='<option value="">— choose a role —</option>'+ADM._roles.map(r=>`<option value="${r.id}">${esc(r.name)}</option>`).join('');
+    m.innerHTML=`<div class="adm-panel"><h2>Assign by role</h2>
+      <div class="adm-lede">Set permissions tied to a job role. These stack on top of department defaults for every user with the role.</div>
+      <div class="adm-bar"><div class="grow"><select id="adm-br-role" onchange="ADM.loadRoleGrid()">${opts}</select></div>
+        <button class="primary" id="adm-br-save" style="display:none" onclick="ADM.saveRoleGrid()">Save grants</button></div>
+      <div id="adm-br-body"></div></div>`; }
+  ADM.loadRoleGrid=async function(){ const c=C(); const id=document.getElementById('adm-br-role').value; const body=document.getElementById('adm-br-body');
+    if(!id){ body.innerHTML=''; document.getElementById('adm-br-save').style.display='none'; return; }
+    const r=roleById(+id);
+    if(r&&r.grants_all){ body.innerHTML='<div class="adm-note">The “'+esc(r.name)+'” role already grants full control over every active application, so there’s nothing to assign here.</div>'; document.getElementById('adm-br-save').style.display='none'; return; }
+    body.innerHTML='<div class="adm-lede">Loading…</div>';
+    const res=await c.from('role_app_access').select('app_id,perms').eq('role_id',+id); const cur={}; (res.data||[]).forEach(x=>cur[x.app_id]=x.perms);
+    ADM._brOrig=Object.assign({},cur);
+    body.innerHTML=`<div class="adm-scroll"><table class="adm-pgrid"><thead><tr>${permHeader()}</tr></thead><tbody>${appList().map(a=>permRow(a,cur[a.id]||0,0)).join('')}</tbody></table></div>`;
+    document.getElementById('adm-br-save').style.display=''; };
+  ADM.saveRoleGrid=async function(){ const c=C(); const id=+document.getElementById('adm-br-role').value; if(!id)return;
+    const desired=collectGrid('#adm-br-body'); const ops=[]; const keys=new Set([...Object.keys(desired),...Object.keys(ADM._brOrig||{})]);
+    keys.forEach(aid=>{ const now=desired[aid]||0, was=(ADM._brOrig||{})[aid]||0; if(now===was)return;
+      if(now>0) ops.push(c.from('role_app_access').upsert({role_id:id,app_id:aid,perms:now},{onConflict:'role_id,app_id'}));
+      else      ops.push(c.from('role_app_access').delete().eq('role_id',id).eq('app_id',aid)); });
+    if(!ops.length){ toast('No changes to save'); return; }
+    await runOps(ops,()=>{ ADM._brOrig=Object.assign({},desired); logAccess('PERM_CHANGE',{scope:'role',role_id:id,perms:desired}); toast('Role grants saved'); }); };
+
+  // ── bulk: multiple users ───────────────────────────────────────────────────
+  async function renderByUsers(){ const m=document.getElementById('adm-main'); if(!ADM._users.length) await loadUsers();
+    const users=ADM._users.map((u,i)=>`<label><input type="checkbox" class="adm-bu-user" value="${i}"> ${esc(u.name||u.email||u.auth_id)} <span style="margin-left:auto;font-size:11px;color:#888780">${esc(deptName(u.department_id))}</span></label>`).join('');
+    const appsHtml=appList().map(a=>`<label><input type="checkbox" class="adm-bu-app" value="${esc(a.id)}"> ${esc(a.icon||'📦')} ${esc(a.name)}</label>`).join('');
+    const perms=PERMS.map(p=>`<label style="display:inline-flex;align-items:center;gap:6px;margin-right:14px"><input type="checkbox" class="adm-bu-perm" value="${p.bit}"> ${p.label}</label>`).join('');
+    m.innerHTML=`<div class="adm-panel"><h2>Assign to multiple users</h2>
+      <div class="adm-lede">Give the same applications and permissions to several users at once. This writes an individual grant on each selected user.</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div><label class="adm-fld">Users</label><div class="adm-sel">${users||'<div class="hint" style="padding:8px">No users.</div>'}</div></div>
+        <div><label class="adm-fld">Applications</label><div class="adm-sel">${appsHtml||'<div class="hint" style="padding:8px">No apps.</div>'}</div></div></div>
+      <div style="margin-top:16px"><label class="adm-fld">Permissions</label><div style="padding:4px 0">${perms}</div></div>
+      <div style="margin-top:16px;display:flex;gap:18px;align-items:center;flex-wrap:wrap">
+        <label class="adm-check"><input type="radio" name="adm-bu-mode" value="grant" checked> Grant these permissions</label>
+        <label class="adm-check"><input type="radio" name="adm-bu-mode" value="remove"> Remove access to selected apps</label>
+        <button class="primary" style="margin-left:auto" onclick="ADM.applyByUsers()">Apply to selected users</button></div></div>`; }
+  ADM.applyByUsers=async function(){ const c=C();
+    const users=[...document.querySelectorAll('.adm-bu-user:checked')].map(x=>ADM._users[+x.value]);
+    const appIds=[...document.querySelectorAll('.adm-bu-app:checked')].map(x=>x.value);
+    const mode=document.querySelector('input[name="adm-bu-mode"]:checked').value;
+    let perms=0; document.querySelectorAll('.adm-bu-perm:checked').forEach(x=>perms|=+x.value);
+    if(!users.length){ toast('Pick at least one user.',true); return; }
+    if(!appIds.length){ toast('Pick at least one application.',true); return; }
+    if(mode==='grant'&&!perms){ toast('Pick at least one permission.',true); return; }
+    const cb=(_currentUser&&_currentUser.auth_id)||null; const ops=[];
+    users.forEach(u=>appIds.forEach(aid=>{
+      if(mode==='grant') ops.push(c.from('user_app_access').upsert({user_auth_id:u.auth_id,app_id:aid,perms_grant:perms,created_by:cb},{onConflict:'user_auth_id,app_id'}));
+      else               ops.push(c.from('user_app_access').delete().eq('user_auth_id',u.auth_id).eq('app_id',aid)); }));
+    await runOps(ops,()=>{ logAccess('PERM_CHANGE',{scope:'bulk_users',mode,users:users.map(u=>u.auth_id),apps:appIds,perms}); toast((mode==='grant'?'Granted to ':'Removed from ')+users.length+' user'+(users.length>1?'s':'')); }); };
+})();
+</script>
+
 </body>
 </html>
