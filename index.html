@@ -817,7 +817,7 @@ async function loadEffectiveAppAccess(){
 
     const queries = [];
     if(_currentUser.department_id)
-      queries.push(c.from('dept_app_access').select('app_id,perms').eq('department_id', _currentUser.department_id));
+      queries.push(c.from('department_app_access').select('app_id,perms').eq('department_id', _currentUser.department_id));
     if(_currentUser.role_id)
       queries.push(c.from('role_app_access').select('app_id,perms').eq('role_id', _currentUser.role_id));
     if(_currentUser.auth_id)
