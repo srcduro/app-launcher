@@ -880,7 +880,7 @@ async function upsertAppCloud(app){
       type:        app.type || 'html',
       tab:         app.tab || 'misc'
     };
-    const { error } = await _sbClient.from(APPS_TABLE).upsert(row, { onConflict: 'id' });
+    const { error } = await _appWriteClient().from(APPS_TABLE).upsert(row, { onConflict: 'id' });
     if(error) return { ok: false, reason: error.message };
     return { ok: true };
   } catch(e){
@@ -888,10 +888,18 @@ async function upsertAppCloud(app){
   }
 }
 
-async function deleteAppCloud(id){
+function deleteAppCloud(id){
+  return _deleteAppCloudImpl(id);
+}
+// App WRITES must carry the custodian's JWT so the database RLS policy can
+// verify auth.uid(). Reads stay on the anon data client (team read access).
+function _appWriteClient(){
+  return (typeof _sbAuthClient !== 'undefined' && _sbAuthClient) ? _sbAuthClient : _sbClient;
+}
+async function _deleteAppCloudImpl(id){
   if(!_cloudReady || !_sbClient) return { ok: false, reason: 'no-cloud' };
   try {
-    const { error } = await _sbClient.from(APPS_TABLE).delete().eq('id', id);
+    const { error } = await _appWriteClient().from(APPS_TABLE).delete().eq('id', id);
     if(error) return { ok: false, reason: error.message };
     return { ok: true };
   } catch(e){
