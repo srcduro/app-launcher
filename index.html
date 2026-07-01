@@ -542,9 +542,9 @@
       <div class="toolbar">
         <button onclick="reloadFromCloud()" id="btn-sync" title="Re-fetch apps from Supabase">↻ Sync</button>
         <button onclick="exportApps()">⬇ Export</button>
-        <button onclick="document.getElementById('import-file').click()" class="admin-only app-only">⬆ Import</button>
+        <button onclick="document.getElementById('import-file').click()" class="admin-only app-only app-editor-only">⬆ Import</button>
         <input type="file" id="import-file" accept=".json" style="display:none" onchange="importApps(event)">
-        <button class="primary admin-only app-only" onclick="openAddModal()">+ Add App</button>
+        <button class="primary admin-only app-only app-editor-only" onclick="openAddModal()">+ Add App</button>
         <button onclick="doLogout()" class="danger">Sign out</button>
       </div>
     </div>
@@ -1322,6 +1322,12 @@ function applyRoleVisibility(){
   document.querySelectorAll('.admin-only').forEach(el => {
     el.classList.toggle('hidden', !isAdmin);
   });
+  // App add/import controls are limited to the single app custodian, so a
+  // non-custodian Admin keeps the console but can't change the app list.
+  const canEditApps = _isAppEditor();
+  document.querySelectorAll('.app-editor-only').forEach(el => {
+    el.classList.toggle('hidden', !canEditApps);
+  });
 }
 
 function updateUserChip(){
@@ -1336,6 +1342,28 @@ function updateUserChip(){
 function requireAdmin(action){
   if(!_currentUser || _currentUser.role !== 'admin'){
     alert('Only an Admin can ' + action + '.');
+    return false;
+  }
+  return true;
+}
+
+// ─── App-custodian gate ──────────────────────────────────────────────
+// Editing, deleting, adding and importing the apps in the launcher is
+// restricted to a SINGLE custodian (S. Roy Choudhury). All other users —
+// including other Admins — can view and launch apps but cannot change the
+// app list. Matched primarily by Supabase auth uid (stable); email is a
+// fallback. This is UI + handler-level enforcement; for hard enforcement,
+// pair it with a row-level-security policy on the apps table.
+const APP_EDITOR_UID   = 'c5b8133c-b14f-4fe3-aa3c-2a748486422d';
+const APP_EDITOR_EMAIL = 'sroychoudhury@duroply.com';
+function _isAppEditor(){
+  if(!_currentUser) return false;
+  return _currentUser.auth_id === APP_EDITOR_UID
+      || String(_currentUser.email || '').toLowerCase() === APP_EDITOR_EMAIL;
+}
+function requireAppEditor(action){
+  if(!_isAppEditor()){
+    alert('Only S. Roy Choudhury is authorised to ' + action + '.');
     return false;
   }
   return true;
@@ -1381,9 +1409,13 @@ function renderTabBar(){
                     onclick="setActiveTab('${t.id}')">
       ${escapeHtml(t.label)} <span class="tab-count">(${cnt})</span>${edit}
     </button>`;
-  }).join('') + (isAdmin
-    ? `<button class="tab-btn adm-tab ${activeTab==='__admin__'?'active':''}" style="--tab-color:#2c2c2a;" onclick="setActiveTab('__admin__')">⚙ Admin</button><button class="new-tab-btn" onclick="addNewTab()">+ New tab</button>`
-    : '');
+  }).join('')
+    + (_isAppEditor()
+        ? `<button class="tab-btn adm-tab ${activeTab==='__admin__'?'active':''}" style="--tab-color:#2c2c2a;" onclick="setActiveTab('__admin__')">⚙ Admin</button>`
+        : '')
+    + (isAdmin
+        ? `<button class="new-tab-btn" onclick="addNewTab()">+ New tab</button>`
+        : '');
 }
 
 function setActiveTab(tabId){
@@ -1473,7 +1505,14 @@ function firstAccessibleTab(){
 function render(){
   const grid = document.getElementById('app-grid');
   const isAdmin = _currentUser && _currentUser.role === 'admin';
+  const canEditApps = _isAppEditor();
   const av = document.getElementById('admin-view');
+  // Only the app custodian may open the Admin console. If anyone else lands on
+  // '__admin__' (persisted tab, direct call, etc.), send them back to a normal tab.
+  if(activeTab === '__admin__' && !canEditApps){
+    activeTab = tabs[0] ? tabs[0].id : 'misc';
+    renderTabBar();
+  }
   if(activeTab === '__admin__'){
     document.body.classList.add('adm-active');
     grid.style.display = 'none';
@@ -1494,13 +1533,13 @@ function render(){
 
   document.getElementById('subtitle').textContent =
     visibleApps.length === 0
-      ? (isAdmin ? 'Click + Add App to install your first application' : 'No apps available — ask an Admin to grant you access')
+      ? (canEditApps ? 'Click + Add App to install your first application' : 'No apps available — ask an Admin to grant you access')
       : `${visibleApps.length} app${visibleApps.length === 1 ? '' : 's'} available across ${tabs.length} tab${tabs.length===1?'':'s'}`;
 
   if(filtered.length === 0){
     grid.innerHTML = `<div class="empty">
       <p style="font-size:15px; margin-bottom:8px;">No apps in "${escapeHtml(tabLabel(activeTab))}"</p>
-      <p style="font-size:13px;">${isAdmin ? 'Click <strong>+ Add App</strong> — the new app will be filed under this tab.' : 'You don\u2019t have access to any apps in this tab.'}</p>
+      <p style="font-size:13px;">${canEditApps ? 'Click <strong>+ Add App</strong> — the new app will be filed under this tab.' : 'You don\u2019t have access to any apps in this tab.'}</p>
     </div>`;
     return;
   }
@@ -1514,7 +1553,7 @@ function render(){
 
   grid.innerHTML = filtered.map(app => `
     <div class="card" style="--tab-color:${activeTabColor};" onclick="launchApp('${app.id}')">
-      ${isAdmin ? `<div class="card-actions">
+      ${canEditApps ? `<div class="card-actions">
         <button onclick="event.stopPropagation(); editApp('${app.id}')">Edit</button>
         <button class="danger" onclick="event.stopPropagation(); deleteApp('${app.id}')">Delete</button>
       </div>` : ''}
@@ -1543,7 +1582,7 @@ function populateTabDropdown(selectedId){
 }
 
 function openAddModal(){
-  if(!requireAdmin('add apps')) return;
+  if(!requireAppEditor('add apps')) return;
   editingId = null;
   document.getElementById('modal-title').textContent = 'Add new app';
   document.getElementById('app-name').value = '';
@@ -1558,7 +1597,7 @@ function openAddModal(){
 }
 
 function editApp(id){
-  if(!requireAdmin('edit apps')) return;
+  if(!requireAppEditor('edit apps')) return;
   const app = apps.find(a => a.id === id);
   if(!app) return;
   editingId = id;
@@ -1588,7 +1627,7 @@ function switchTab(tab){
 }
 
 async function saveApp(){
-  if(!requireAdmin('save apps')) return;
+  if(!requireAppEditor('save apps')) return;
   const name = document.getElementById('app-name').value.trim();
   const icon = document.getElementById('app-icon').value.trim() || '📦';
   const description = document.getElementById('app-desc').value.trim();
@@ -1651,7 +1690,7 @@ async function saveApp(){
 }
 
 async function deleteApp(id){
-  if(!requireAdmin('delete apps')) return;
+  if(!requireAppEditor('delete apps')) return;
   const app = apps.find(a => a.id === id);
   if(!app) return;
   if(!confirm(`Delete "${app.name}"? This cannot be undone.`)) return;
@@ -1871,7 +1910,7 @@ function exportApps(){
 }
 
 async function importApps(event){
-  if(!requireAdmin('import apps')){ event.target.value = ''; return; }
+  if(!requireAppEditor('import apps')){ event.target.value = ''; return; }
   const file = event.target.files[0];
   if(!file) return;
   try {
