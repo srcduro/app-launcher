@@ -989,7 +989,7 @@ const DEFAULT_TABS = [
   { id: 'purchase',  label: 'Purchase' },
   { id: 'inventory', label: 'Inventory' },
   { id: 'financial', label: 'Financial' },
-  { id: 'misc',      label: 'Miscellaneous' }
+  { id: 'misc',      label: 'Link to Other Apps' }
 ];
 const TABS_TABLE  = 'launcher_tabs';
 const TABS_LOCAL  = 'launcher_tabs_local';
@@ -1030,13 +1030,25 @@ function loadTabsLocal(){
   catch(e){ return null; }
 }
 async function loadTabs(){
+  let resolved = false;
   if(_cloudReady){
     const cloud = await loadTabsFromCloud();
-    if(cloud){ tabs = cloud; saveTabsLocal(); return; }
+    if(cloud){ tabs = cloud; saveTabsLocal(); resolved = true; }
   }
-  const local = loadTabsLocal();
-  if(local && local.length){ tabs = local; return; }
-  tabs = DEFAULT_TABS.slice();
+  if(!resolved){
+    const local = loadTabsLocal();
+    if(local && local.length){ tabs = local; }
+    else { tabs = DEFAULT_TABS.slice(); }
+  }
+  // One-time migration: the 'misc' tab was renamed
+  // 'Miscellaneous' → 'Link to Other Apps'. Stored copies (Supabase /
+  // localStorage) override DEFAULT_TABS, so patch them here and persist.
+  const _mt = tabs.find(t => t.id === 'misc');
+  if(_mt && _mt.label === 'Miscellaneous'){
+    _mt.label = 'Link to Other Apps';
+    saveTabsLocal();
+    if(_cloudReady) upsertTabCloud(_mt, tabs.indexOf(_mt));  // fire-and-forget
+  }
 }
 function tabExists(id){ return tabs.some(t => t.id === id); }
 function tabLabel(id){ const t = tabs.find(x => x.id === id); return t ? t.label : id; }
@@ -1460,10 +1472,10 @@ async function manageTab(tabId){
   if(choice.trim().toLowerCase() === 'delete'){
     const appsInTab = apps.filter(a => (a.tab || 'misc') === tabId).length;
     if(appsInTab > 0){
-      if(!confirm(`"${t.label}" contains ${appsInTab} app${appsInTab===1?'':'s'}. They will be moved to "Miscellaneous". Continue?`)) return;
+      if(!confirm(`"${t.label}" contains ${appsInTab} app${appsInTab===1?'':'s'}. They will be moved to "Link to Other Apps". Continue?`)) return;
       if(!tabExists('misc')){
-        tabs.push({ id:'misc', label:'Miscellaneous' });
-        if(_cloudReady) await upsertTabCloud({id:'misc',label:'Miscellaneous'}, tabs.length-1);
+        tabs.push({ id:'misc', label:'Link to Other Apps' });
+        if(_cloudReady) await upsertTabCloud({id:'misc',label:'Link to Other Apps'}, tabs.length-1);
       }
       apps.forEach(a => { if((a.tab||'misc') === tabId) a.tab = 'misc'; });
       saveAppsLocal();
