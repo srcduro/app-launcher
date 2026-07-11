@@ -484,9 +484,14 @@
   .adm-ba-all input{width:16px;height:16px}
   .adm-ba-tools{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
   .adm-ba-tools input{flex:1;min-width:160px}
-  .adm-ba-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:4px 14px;max-height:340px;overflow:auto;border:1px solid #d3d1c7;border-radius:8px;padding:10px}
-  .adm-ba-grid label{display:flex;align-items:center;gap:8px;font-size:13px;padding:4px 6px;border-radius:6px;cursor:pointer}
-  .adm-ba-grid label:hover{background:#f1efe8}
+  .adm-ba-grid{max-height:380px;overflow:auto;border:1px solid #d3d1c7;border-radius:8px;padding:6px 10px 10px}
+  .adm-ba-zone{margin-top:8px}
+  .adm-ba-zhead{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:#1f3a5f;letter-spacing:.4px;padding:6px 6px;background:#f1efe8;border:1px solid #e2dfd3;border-radius:7px;cursor:pointer;position:sticky;top:0}
+  .adm-ba-zhead input{width:15px;height:15px}
+  .adm-ba-zn{font-weight:400;color:#5f5e5a;font-size:11.5px}
+  .adm-ba-zgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:2px 14px;padding:6px 4px 2px 22px}
+  .adm-ba-zgrid label{display:flex;align-items:center;gap:8px;font-size:13px;padding:3px 6px;border-radius:6px;cursor:pointer}
+  .adm-ba-zgrid label:hover{background:#f1efe8}
   .adm-ba-grid.disabled{opacity:.45;pointer-events:none}
   .adm-ba-count{font-size:12px;color:#5f5e5a;margin-left:auto;white-space:nowrap}
   .adm-sel label{display:flex;align-items:center;gap:8px;padding:6px;border-radius:6px;font-size:13px;cursor:pointer}
@@ -2270,32 +2275,41 @@ init();
   //     trigger keeps both stores in sync whichever one is written).
   const BA_DIMENSION='SELLING_BRANCH';
 
-  // Load the branch master from DUROPLY.selling_branches (Active rows only).
-  // Falls back to the union of branches already assigned on user_profiles so
-  // the panel stays usable even if the master table is unreadable.
+  // Load the branch master from DUROPLY.selling_branches (Active rows only),
+  // including each branch's Zone for grouped display. Gracefully degrades:
+  // if the zone column doesn't exist yet (schema §6 not run) branches load
+  // without zones; if the master table is unreadable entirely, falls back to
+  // the union of branches already assigned on user_profiles.
+  // Returns [{name, zone}] sorted by zone then name.
   async function loadBranchMaster(force){
     if(ADM._branches && !force) return ADM._branches;
     const c=C(); if(!c) return (ADM._branches=[]);
+    const INACTIVE=new Set(['inactive','disabled','deleted','removed','archived','suspended','no','n']);
+    const buildList=(data,hasZone)=>{
+      const seen=new Map();
+      (data||[]).forEach(r=>{
+        const n=(r.name||'').toString().trim(); if(!n) return;
+        const s=(r.status==null?'':String(r.status).trim().toLowerCase());
+        if(INACTIVE.has(s)) return;
+        if(!seen.has(n.toUpperCase()))
+          seen.set(n.toUpperCase(),{name:n, zone:hasZone?((r.zone||'').toString().trim().toUpperCase()):''});
+      });
+      return [...seen.values()].sort((a,b)=>(a.zone||'\uffff').localeCompare(b.zone||'\uffff')||a.name.localeCompare(b.name));
+    };
     try{
-      const res=await c.from('selling_branches').select('name,status').order('name');
+      let res=await c.from('selling_branches').select('name,status,zone').order('name');
+      if(res.error && /zone/i.test(res.error.message||''))               // zone column not deployed yet
+        res=await c.from('selling_branches').select('name,status').order('name');
       if(!res.error && Array.isArray(res.data) && res.data.length){
-        const INACTIVE=new Set(['inactive','disabled','deleted','removed','archived','suspended','no','n']);
-        const seen=new Map();
-        res.data.forEach(r=>{
-          const n=(r.name||'').toString().trim(); if(!n) return;
-          const s=(r.status==null?'':String(r.status).trim().toLowerCase());
-          if(INACTIVE.has(s)) return;
-          if(!seen.has(n.toUpperCase())) seen.set(n.toUpperCase(),n);
-        });
-        ADM._branches=[...seen.values()].sort();
+        ADM._branches=buildList(res.data, res.data.length && ('zone' in res.data[0]));
         return ADM._branches;
       }
     }catch(_){/* fall through to fallback */}
-    // Fallback: derive from existing user assignments.
+    // Fallback: derive from existing user assignments (no zones available).
     const set=new Map();
     (ADM._users||[]).forEach(u=>(Array.isArray(u.branches)?u.branches:[]).forEach(b=>{
-      const n=(b||'').toString().trim(); if(n&&n.toUpperCase()!=='ALL'&&!set.has(n.toUpperCase()))set.set(n.toUpperCase(),n); }));
-    ADM._branches=[...set.values()].sort();
+      const n=(b||'').toString().trim(); if(n&&n.toUpperCase()!=='ALL'&&!set.has(n.toUpperCase()))set.set(n.toUpperCase(),{name:n,zone:''}); }));
+    ADM._branches=[...set.values()].sort((a,b)=>a.name.localeCompare(b.name));
     return ADM._branches;
   }
 
@@ -2337,26 +2351,63 @@ init();
     const adminNote=(u.role==='admin'||u.role==='super_user'||(r&&r.grants_all))
       ? '<div class="adm-note">ℹ This user has an <strong>admin / all-access role</strong>, so dashboards ignore branch restrictions for them. You can still record an assignment below; it takes effect if their role is ever downgraded.</div>' : '';
     const sel=new Set(values.map(v=>v.toUpperCase()));
-    const boxes=branches.map(b=>`<label><input type="checkbox" class="adm-ba-cb" value="${esc(b)}" ${sel.has(b.toUpperCase())?'checked':''} onchange="ADM.baCount()"> ${esc(b)}</label>`).join('');
+    // ── Group branches by Zone. Zone header carries a select-all checkbox
+    //    (tri-state: checked / indeterminate / unchecked). Branches without a
+    //    zone (schema §6 not run, or unmapped) collect under "UNASSIGNED".
+    const groups=new Map();
+    branches.forEach(b=>{ const z=b.zone||''; if(!groups.has(z))groups.set(z,[]); groups.get(z).push(b); });
+    const zoneKeys=[...groups.keys()].sort((a,b)=>(a||'\uffff').localeCompare(b||'\uffff')); // '' (unassigned) last
+    const boxes=zoneKeys.map((z,zi)=>{
+      const zid='z'+zi; const list=groups.get(z);
+      const rows=list.map(b=>`<label data-zone="${zid}"><input type="checkbox" class="adm-ba-cb" data-zone="${zid}" value="${esc(b.name)}" ${sel.has(b.name.toUpperCase())?'checked':''} onchange="ADM.baCount()"> ${esc(b.name)}</label>`).join('');
+      return `<div class="adm-ba-zone" data-zone="${zid}" data-zname="${esc(z||'UNASSIGNED')}">
+        <label class="adm-ba-zhead"><input type="checkbox" class="adm-ba-zcb" data-zone="${zid}" onchange="ADM.baToggleZone(this)">
+          🗺 ${esc(z||'UNASSIGNED ZONE')} <span class="adm-ba-zn" data-zone="${zid}"></span></label>
+        <div class="adm-ba-zgrid">${rows}</div></div>`;
+    }).join('');
     body.innerHTML=`${adminNote}
       <label class="adm-ba-all"><input type="checkbox" id="adm-ba-all" ${allAccess?'checked':''} onchange="ADM.baToggleAll()">
         🏢 All branches — unrestricted access (bypasses branch filtering)</label>
       <div class="adm-ba-tools">
-        <input id="adm-ba-search" placeholder="Search branches…" oninput="ADM.baFilter()">
+        <input id="adm-ba-search" placeholder="Search branches or zones…" oninput="ADM.baFilter()">
         <button onclick="ADM.baSetAll(true)">Select all</button>
         <button onclick="ADM.baSetAll(false)">Clear</button>
         <span class="adm-ba-count" id="adm-ba-count"></span></div>
       <div class="adm-ba-grid ${allAccess?'disabled':''}" id="adm-ba-grid">${boxes||'<div class="hint">No branches found. Add them in the dashboard\u2019s Branch Master (DUROPLY.selling_branches).</div>'}</div>
-      <div class="hint" style="margin-top:10px">Saving overwrites the user\u2019s previous branch assignment (no duplicates are ever created) and mirrors it to their profile, so every dashboard picks it up on their next sign-in.</div>`;
+      <div class="hint" style="margin-top:10px">Tick a <strong>zone</strong> to select every selling branch under it in one click. Saving overwrites the user\u2019s previous branch assignment (no duplicates are ever created) and mirrors it to their profile, so every dashboard picks it up on their next sign-in.</div>`;
     document.getElementById('adm-ba-save').style.display='';
     ADM.baCount();
   }
   ADM.baToggleAll=function(){ const all=document.getElementById('adm-ba-all').checked;
     document.getElementById('adm-ba-grid').classList.toggle('disabled',all); ADM.baCount(); };
+  // Zone select-all: (un)ticks every branch in the zone regardless of any
+  // active search filter — "select the Zone" means the whole zone.
+  ADM.baToggleZone=function(zcb){ const z=zcb.getAttribute('data-zone'); const on=zcb.checked;
+    document.querySelectorAll('#adm-ba-grid .adm-ba-cb[data-zone="'+z+'"]').forEach(cb=>cb.checked=on); ADM.baCount(); };
   ADM.baSetAll=function(on){ document.querySelectorAll('#adm-ba-grid .adm-ba-cb').forEach(cb=>{ if(cb.closest('label').style.display!=='none') cb.checked=on; }); ADM.baCount(); };
+  // Search matches branch names OR zone names; a zone whose name matches shows
+  // all of its branches, and zone sections with no visible branches collapse.
   ADM.baFilter=function(){ const q=(document.getElementById('adm-ba-search').value||'').toUpperCase();
-    document.querySelectorAll('#adm-ba-grid label').forEach(l=>{ l.style.display=l.textContent.toUpperCase().includes(q)?'':'none'; }); };
+    document.querySelectorAll('#adm-ba-grid .adm-ba-zone').forEach(sec=>{
+      const zname=(sec.getAttribute('data-zname')||'').toUpperCase();
+      const zoneHit=!q||zname.includes(q);
+      let visible=0;
+      sec.querySelectorAll('.adm-ba-zgrid label').forEach(l=>{
+        const show=zoneHit||l.textContent.toUpperCase().includes(q);
+        l.style.display=show?'':'none'; if(show)visible++;
+      });
+      sec.style.display=visible?'':'none';
+    }); };
+  // Refresh the selection counter AND each zone checkbox's tri-state.
   ADM.baCount=function(){ const el=document.getElementById('adm-ba-count'); if(!el)return;
+    document.querySelectorAll('#adm-ba-grid .adm-ba-zcb').forEach(zcb=>{
+      const z=zcb.getAttribute('data-zone');
+      const cbs=[...document.querySelectorAll('#adm-ba-grid .adm-ba-cb[data-zone="'+z+'"]')];
+      const on=cbs.filter(c=>c.checked).length;
+      zcb.checked=on>0&&on===cbs.length; zcb.indeterminate=on>0&&on<cbs.length;
+      const n=document.querySelector('#adm-ba-grid .adm-ba-zn[data-zone="'+z+'"]');
+      if(n)n.textContent='('+on+'/'+cbs.length+')';
+    });
     if(document.getElementById('adm-ba-all').checked){ el.textContent='All branches'; return; }
     const n=document.querySelectorAll('#adm-ba-grid .adm-ba-cb:checked').length;
     el.textContent=n+' of '+document.querySelectorAll('#adm-ba-grid .adm-ba-cb').length+' selected'; };
