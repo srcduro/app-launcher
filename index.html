@@ -479,6 +479,16 @@
   .adm-note{font-size:12px;color:#7a5e12;background:#fef9e7;border:1px solid #f3e3a8;border-radius:8px;padding:10px 12px;line-height:1.55;margin-bottom:14px}
   .adm-fld{display:block;font-size:11px;font-weight:600;color:#444441;letter-spacing:.3px;text-transform:uppercase;margin:0 0 5px}
   .adm-sel{max-height:240px;overflow:auto;border:1px solid #d3d1c7;border-radius:8px;padding:6px}
+  /* ── Selling branch access panel ── */
+  .adm-ba-all{display:flex;align-items:center;gap:10px;padding:12px 14px;border:1.5px solid #1f3a5f;border-radius:10px;background:#eef3fa;margin-bottom:14px;font-weight:500}
+  .adm-ba-all input{width:16px;height:16px}
+  .adm-ba-tools{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+  .adm-ba-tools input{flex:1;min-width:160px}
+  .adm-ba-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:4px 14px;max-height:340px;overflow:auto;border:1px solid #d3d1c7;border-radius:8px;padding:10px}
+  .adm-ba-grid label{display:flex;align-items:center;gap:8px;font-size:13px;padding:4px 6px;border-radius:6px;cursor:pointer}
+  .adm-ba-grid label:hover{background:#f1efe8}
+  .adm-ba-grid.disabled{opacity:.45;pointer-events:none}
+  .adm-ba-count{font-size:12px;color:#5f5e5a;margin-left:auto;white-space:nowrap}
   .adm-sel label{display:flex;align-items:center;gap:8px;padding:6px;border-radius:6px;font-size:13px;cursor:pointer}
   .adm-sel label:hover{background:#f7f5ee}
   .adm-sel input{width:auto}
@@ -2046,7 +2056,7 @@ init();
   const PERMS=[{bit:1,ab:'V',label:'View'},{bit:2,ab:'C',label:'Create'},{bit:4,ab:'E',label:'Edit'},
     {bit:8,ab:'D',label:'Delete'},{bit:16,ab:'X',label:'Export'},{bit:32,ab:'Ap',label:'Approve'},{bit:64,ab:'Ad',label:'Admin'}];
   const ADM={ _built:false, _view:'users', _departments:[], _roles:[], _users:[], _accessIdx:null,
-              _uaOrig:{}, _bdOrig:{}, _brOrig:{} };
+              _uaOrig:{}, _bdOrig:{}, _brOrig:{}, _baIdx:null, _baOrig:null, _branches:null };
   window.ADM=ADM;
 
   // ── plumbing ──────────────────────────────────────────────────────────────
@@ -2088,6 +2098,7 @@ init();
       `<button class="${ADM._view==='users'?'active':''}" onclick="ADM.show('users')">Users</button>`+
       '<span class="grp">Access</span>'+
       `<button class="${ADM._view==='useraccess'?'active':''}" onclick="ADM.show('useraccess')">User access</button>`+
+      `<button class="${ADM._view==='branchaccess'?'active':''}" onclick="ADM.show('branchaccess')">Selling branches</button>`+
       '<span class="grp">Bulk</span>'+
       `<button class="${ADM._view==='bydept'?'active':''}" onclick="ADM.show('bydept')">By department</button>`+
       `<button class="${ADM._view==='byrole'?'active':''}" onclick="ADM.show('byrole')">By role</button>`+
@@ -2096,6 +2107,7 @@ init();
   ADM.show=function(view){ ADM._view=view; drawNav();
     if(view==='users') renderUsers();
     else if(view==='useraccess') renderUserAccess();
+    else if(view==='branchaccess') renderBranchAccess();
     else if(view==='bydept') renderByDept();
     else if(view==='byrole') renderByRole();
     else if(view==='byusers') renderByUsers();
@@ -2185,6 +2197,16 @@ init();
       res = mode==='edit' ? await c.from('user_profiles').update(row).eq('auth_id',authId)
                           : await c.from('user_profiles').upsert(row,{onConflict:'auth_id'}); }
     if(res.error){ toast('Save failed: '+res.error.message,true); return; }
+    // Keep the generic scopes table in step with the legacy branches field.
+    // (A DB trigger does this too — this is a belt-and-braces client mirror
+    // that also covers projects where the trigger isn't deployed yet.)
+    try{ await c.from('user_access_scopes').upsert(
+      {user_auth_id:authId, dimension:'SELLING_BRANCH',
+       all_access:branches.includes('ALL'),
+       allowed_values:branches.filter(b=>b!=='ALL'),
+       updated_by:(me()&&me().auth_id)||null, updated_at:new Date().toISOString()},
+      {onConflict:'user_auth_id,dimension'});
+    }catch(_){/* non-fatal — table may not be deployed yet */}
     logAccess('USER_'+(mode==='edit'?'EDIT':'CREATE'),{auth_id:authId,name});
     ADM.closeModal(); await loadUsers(); drawUsers(ADM._users); toast(mode==='edit'?'User updated':'User created');
   };
@@ -2234,6 +2256,136 @@ init();
       else      ops.push(c.from('user_app_access').delete().eq('user_auth_id',u.auth_id).eq('app_id',id)); });
     if(!ops.length){ toast('No changes to save'); return; }
     await runOps(ops,()=>{ ADM._uaOrig=Object.assign({},desired); logAccess('PERM_CHANGE',{scope:'user',auth_id:u.auth_id,perms:desired}); toast('Access updated for '+(u.name||u.email)); });
+  };
+
+  // ══ SELLING BRANCH ACCESS ═══════════════════════════════════════════════
+  // Assign the Selling Branches each user may see across every dashboard.
+  // Storage model (see duroply_branch_access_schema.sql):
+  //   · "DUROPLY".user_access_scopes — generic (user_auth_id, dimension) rows.
+  //     dimension='SELLING_BRANCH' today; the same table/UI pattern extends to
+  //     PRODUCT_CATEGORY / CUSTOMER_GROUP / TERRITORY / SALESPERSON / … later.
+  //     PK (user_auth_id, dimension) ⇒ every save is a clean UPSERT overwrite.
+  //   · user_profiles.branches is mirrored on save for full backward
+  //     compatibility (the dashboard's legacy reads keep working, and a DB
+  //     trigger keeps both stores in sync whichever one is written).
+  const BA_DIMENSION='SELLING_BRANCH';
+
+  // Load the branch master from DUROPLY.selling_branches (Active rows only).
+  // Falls back to the union of branches already assigned on user_profiles so
+  // the panel stays usable even if the master table is unreadable.
+  async function loadBranchMaster(force){
+    if(ADM._branches && !force) return ADM._branches;
+    const c=C(); if(!c) return (ADM._branches=[]);
+    try{
+      const res=await c.from('selling_branches').select('name,status').order('name');
+      if(!res.error && Array.isArray(res.data) && res.data.length){
+        const INACTIVE=new Set(['inactive','disabled','deleted','removed','archived','suspended','no','n']);
+        const seen=new Map();
+        res.data.forEach(r=>{
+          const n=(r.name||'').toString().trim(); if(!n) return;
+          const s=(r.status==null?'':String(r.status).trim().toLowerCase());
+          if(INACTIVE.has(s)) return;
+          if(!seen.has(n.toUpperCase())) seen.set(n.toUpperCase(),n);
+        });
+        ADM._branches=[...seen.values()].sort();
+        return ADM._branches;
+      }
+    }catch(_){/* fall through to fallback */}
+    // Fallback: derive from existing user assignments.
+    const set=new Map();
+    (ADM._users||[]).forEach(u=>(Array.isArray(u.branches)?u.branches:[]).forEach(b=>{
+      const n=(b||'').toString().trim(); if(n&&n.toUpperCase()!=='ALL'&&!set.has(n.toUpperCase()))set.set(n.toUpperCase(),n); }));
+    ADM._branches=[...set.values()].sort();
+    return ADM._branches;
+  }
+
+  async function renderBranchAccess(){ const m=document.getElementById('adm-main');
+    if(!ADM._users.length) await loadUsers();
+    m.innerHTML=`<div class="adm-panel"><h2>Selling branch access</h2>
+      <div class="adm-lede">Restrict which <strong>Selling Branches</strong> a user can see across all dashboards and reports. Pick a user, tick their branches (or “All branches”), then save. Assignments load automatically when a user is selected.</div>
+      <div class="adm-bar"><div class="grow"><select id="adm-ba-user" onchange="ADM.pickBaUser()">
+        <option value="">— choose a user —</option>${ADM._users.map((u,i)=>`<option value="${i}" ${i===ADM._baIdx?'selected':''}>${esc(u.name||u.email||u.auth_id)}</option>`).join('')}
+      </select></div>
+      <button class="primary" id="adm-ba-save" style="display:none" onclick="ADM.saveBranchAccess()">Save branches</button></div>
+      <div id="adm-ba-body"></div></div>`;
+    if(ADM._baIdx!=null && ADM._users[ADM._baIdx]) drawBranchAccess(ADM._users[ADM._baIdx]);
+  }
+  ADM.pickBaUser=function(){ const v=document.getElementById('adm-ba-user').value; ADM._baIdx=v===''?null:+v;
+    if(ADM._baIdx==null){ document.getElementById('adm-ba-body').innerHTML=''; document.getElementById('adm-ba-save').style.display='none'; return; }
+    drawBranchAccess(ADM._users[ADM._baIdx]); };
+
+  async function drawBranchAccess(u){ const c=C(); const body=document.getElementById('adm-ba-body');
+    body.innerHTML='<div class="adm-lede">Loading…</div>';
+    const branches=await loadBranchMaster();
+    // Current assignment: prefer the scopes table; fall back to the mirrored
+    // user_profiles.branches array (legacy source) if no scope row exists yet.
+    let allAccess=false, values=[];
+    try{
+      const sc=await c.from('user_access_scopes').select('all_access,allowed_values')
+        .eq('user_auth_id',u.auth_id).eq('dimension',BA_DIMENSION).maybeSingle();
+      if(sc.error && !/relation|does not exist|schema cache/i.test(sc.error.message||'')) throw sc.error;
+      if(sc.data){ allAccess=!!sc.data.all_access; values=Array.isArray(sc.data.allowed_values)?sc.data.allowed_values:[]; }
+      else{ // legacy fallback — NULL/'ALL' means unrestricted, [] means none
+        const brs=Array.isArray(u.branches)?u.branches:null;
+        if(brs===null || brs.includes('ALL')) allAccess=true;
+        else values=brs.slice();
+      }
+    }catch(e){ body.innerHTML='<div class="adm-note">Could not load current assignment: '+esc(e.message||String(e))+'<br>Has <strong>duroply_branch_access_schema.sql</strong> been run in Supabase?</div>'; return; }
+    ADM._baOrig={all:allAccess, values:values.slice()};
+
+    const r=roleById(u.role_id);
+    const adminNote=(u.role==='admin'||u.role==='super_user'||(r&&r.grants_all))
+      ? '<div class="adm-note">ℹ This user has an <strong>admin / all-access role</strong>, so dashboards ignore branch restrictions for them. You can still record an assignment below; it takes effect if their role is ever downgraded.</div>' : '';
+    const sel=new Set(values.map(v=>v.toUpperCase()));
+    const boxes=branches.map(b=>`<label><input type="checkbox" class="adm-ba-cb" value="${esc(b)}" ${sel.has(b.toUpperCase())?'checked':''} onchange="ADM.baCount()"> ${esc(b)}</label>`).join('');
+    body.innerHTML=`${adminNote}
+      <label class="adm-ba-all"><input type="checkbox" id="adm-ba-all" ${allAccess?'checked':''} onchange="ADM.baToggleAll()">
+        🏢 All branches — unrestricted access (bypasses branch filtering)</label>
+      <div class="adm-ba-tools">
+        <input id="adm-ba-search" placeholder="Search branches…" oninput="ADM.baFilter()">
+        <button onclick="ADM.baSetAll(true)">Select all</button>
+        <button onclick="ADM.baSetAll(false)">Clear</button>
+        <span class="adm-ba-count" id="adm-ba-count"></span></div>
+      <div class="adm-ba-grid ${allAccess?'disabled':''}" id="adm-ba-grid">${boxes||'<div class="hint">No branches found. Add them in the dashboard\u2019s Branch Master (DUROPLY.selling_branches).</div>'}</div>
+      <div class="hint" style="margin-top:10px">Saving overwrites the user\u2019s previous branch assignment (no duplicates are ever created) and mirrors it to their profile, so every dashboard picks it up on their next sign-in.</div>`;
+    document.getElementById('adm-ba-save').style.display='';
+    ADM.baCount();
+  }
+  ADM.baToggleAll=function(){ const all=document.getElementById('adm-ba-all').checked;
+    document.getElementById('adm-ba-grid').classList.toggle('disabled',all); ADM.baCount(); };
+  ADM.baSetAll=function(on){ document.querySelectorAll('#adm-ba-grid .adm-ba-cb').forEach(cb=>{ if(cb.closest('label').style.display!=='none') cb.checked=on; }); ADM.baCount(); };
+  ADM.baFilter=function(){ const q=(document.getElementById('adm-ba-search').value||'').toUpperCase();
+    document.querySelectorAll('#adm-ba-grid label').forEach(l=>{ l.style.display=l.textContent.toUpperCase().includes(q)?'':'none'; }); };
+  ADM.baCount=function(){ const el=document.getElementById('adm-ba-count'); if(!el)return;
+    if(document.getElementById('adm-ba-all').checked){ el.textContent='All branches'; return; }
+    const n=document.querySelectorAll('#adm-ba-grid .adm-ba-cb:checked').length;
+    el.textContent=n+' of '+document.querySelectorAll('#adm-ba-grid .adm-ba-cb').length+' selected'; };
+
+  ADM.saveBranchAccess=async function(){ const c=C(); const u=ADM._users[ADM._baIdx]; if(!u||!c)return;
+    const all=document.getElementById('adm-ba-all').checked;
+    const values=all?[]:[...document.querySelectorAll('#adm-ba-grid .adm-ba-cb:checked')].map(cb=>cb.value);
+    if(!all && !values.length){
+      if(!confirm('No branches are selected. '+(u.name||u.email)+' will see NO data in the dashboards until branches are assigned.\n\nSave anyway?')) return;
+    }
+    // No-op guard
+    const o=ADM._baOrig||{all:false,values:[]};
+    if(o.all===all && o.values.length===values.length && o.values.every(v=>values.includes(v))){ toast('No changes to save'); return; }
+    const cb=(me()&&me().auth_id)||null;
+    const mirrored=all?['ALL']:values.slice();           // legacy user_profiles format
+    const ops=[
+      // 1) The generic framework table — UPSERT on (user, dimension) = clean overwrite.
+      c.from('user_access_scopes').upsert(
+        {user_auth_id:u.auth_id, dimension:BA_DIMENSION, all_access:all, allowed_values:values, updated_by:cb, updated_at:new Date().toISOString()},
+        {onConflict:'user_auth_id,dimension'}),
+      // 2) Backward-compat mirror so legacy reads (and older dashboard builds) stay correct.
+      c.from('user_profiles').update({branches:mirrored, branch:mirrored[0]||''}).eq('auth_id',u.auth_id)
+    ];
+    await runOps(ops,()=>{
+      ADM._baOrig={all, values:values.slice()};
+      u.branches=mirrored.slice(); u.branch=mirrored[0]||'';
+      logAccess('PERM_CHANGE',{scope:'selling_branch',auth_id:u.auth_id,all_access:all,branches:values});
+      toast('Branch access updated for '+(u.name||u.email));
+    });
   };
 
   // ── bulk: department ───────────────────────────────────────────────────────
