@@ -1814,16 +1814,14 @@ function launchApp(id){
   // indistinguishable from a popup-blocked return, making it impossible
   // to tell the user when their browser blocked the launch.
   function _launcherWindowFeatures(){
-    // screen.availWidth/availHeight reports the usable area excluding
-    // the OS taskbar/dock. Fall back to sensible defaults if either
-    // isn't reported by the browser.
-    // V148: also request the window come up at top-left and at the
-    // largest size the browser will honour. Most browsers cap window.open
-    // sizing at availWidth/availHeight, which is exactly what we want.
-    const w = (screen && screen.availWidth)  ? screen.availWidth  : 1280;
-    const h = (screen && screen.availHeight) ? screen.availHeight : 800;
-    return 'popup=yes,width=' + w + ',height=' + h + ',left=0,top=0,screenX=0,screenY=0'
-         + ',resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no,fullscreen=yes';
+    // V149: return an empty features string. window.open(url, '_blank', '')
+    // is treated by browsers as a request for a normal tab in the same
+    // browser window, rather than a separate chrome-less popup window.
+    // (Previously this returned 'popup=yes,width=...,height=...,...' which
+    // is what forced apps to open in their own standalone window instead
+    // of a tab. Kept the function/name so the two call sites below don't
+    // need to change.)
+    return '';
   }
 
   const features = _launcherWindowFeatures();
