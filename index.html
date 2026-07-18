@@ -549,7 +549,7 @@
       <img src="" alt="Duroply" id="login-logo-img">
     </div>
     <h1 style="color:#39FF14;">APP LAUNCHER</h1>
-    <p class="subtitle" id="login-subtitle">Enter your email to receive a one-time code</p>
+    <p class="subtitle" id="login-subtitle">Enter your email or employee code for OTP</p>
 
     <!-- STEP 1: Email / Employee-ID entry -->
     <div class="login-form" id="step-email" autocomplete="off">
@@ -1461,9 +1461,7 @@ function doResetOtpFlow(){
   // typed value.
   document.getElementById('step-otp').classList.add('hidden');
   document.getElementById('step-email').classList.remove('hidden');
-  document.getElementById('login-subtitle').textContent =
-    _loginMode === 'empcode' ? 'Enter your employee ID to receive a one-time code'
-                              : 'Enter your email to receive a one-time code';
+  document.getElementById('login-subtitle').textContent = 'Enter your email or employee code for OTP';
   document.getElementById('login-otp').value = '';
   document.getElementById('login-err').textContent = '';
   document.getElementById('login-err-otp').textContent = '';
