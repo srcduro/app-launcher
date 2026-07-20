@@ -104,31 +104,6 @@
     margin-bottom: 18px;
   }
   .login-form.hidden { display: none; }
-  .login-mode-toggle {
-    display: flex;
-    background: rgba(255,255,255,0.08);
-    border-radius: 999px;
-    padding: 3px;
-    margin-bottom: 14px;
-  }
-  .login-mode-toggle button {
-    flex: 1;
-    border: none;
-    background: transparent;
-    color: #cbd5e1;
-    font-size: 11.5px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-    padding: 8px 6px;
-    border-radius: 999px;
-    cursor: pointer;
-    transition: background 0.15s, color 0.15s;
-  }
-  .login-mode-toggle button.active {
-    background: #fff;
-    color: #1f3a5f;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-  }
   .login-form .form-group {
     margin-bottom: 11px;
     position: relative;
@@ -549,20 +524,13 @@
       <img src="" alt="Duroply" id="login-logo-img">
     </div>
     <h1 style="color:#39FF14;">APP LAUNCHER</h1>
-    <p class="subtitle" id="login-subtitle">Enter your email or employee code for OTP</p>
+    <p class="subtitle" id="login-subtitle">Enter your Employee Code or Email Address to sign in</p>
 
-    <!-- STEP 1: Email / Employee-ID entry -->
+    <!-- STEP 1: Employee Code / Email entry (single unified field) -->
     <div class="login-form" id="step-email" autocomplete="off">
-      <div class="login-mode-toggle">
-        <button type="button" id="mode-btn-email" class="active" onclick="setLoginMode('email')">EMAIL</button>
-        <button type="button" id="mode-btn-empcode" onclick="setLoginMode('empcode')">EMPLOYEE ID</button>
-      </div>
       <div class="form-group">
-        <input type="email" id="login-user" autocomplete="username" placeholder="Email">
-      </div>
-      <div class="form-group hidden" id="empcode-group">
-        <input type="text" id="login-empcode" autocomplete="off" placeholder="Employee ID (e.g. EMP1042)"
-               style="text-transform:uppercase;">
+        <input type="text" id="login-identifier" autocomplete="username"
+               placeholder="Enter Employee Code or Email Address">
       </div>
       <button class="login-btn" id="send-otp-btn" onclick="doSendOtp()">SEND CODE</button>
       <div class="login-err" id="login-err"></div>
@@ -1149,39 +1117,27 @@ function tabLabel(id){ const t = tabs.find(x => x.id === id); return t ? t.label
 let _otpCooldownUntil = 0;  // unix ms timestamp
 let _otpCooldownTimer = null;
 
-// ─── Employee-ID login mode ─────────────────────────────────────────────
-// Two ways in: plain email (as before), or an employee code that we
-// resolve to the matching email via a Supabase RPC BEFORE calling
-// signInWithOtp. The OTP itself always goes to an email address — the
-// employee code is purely a lookup key, never sent to Supabase Auth
-// directly. _resolvedLoginEmail holds whichever email ends up being used
-// so doVerifyOtp() always verifies against the right address, regardless
-// of which mode was used to get there.
-let _loginMode = 'email';        // 'email' | 'empcode'
+// ─── Unified Employee Code / Email login ────────────────────────────────
+// A single input accepts either a 5-6 character employee code or an email
+// address. We auto-detect which one was typed, resolve an employee code
+// to its tagged email via a Supabase RPC BEFORE calling signInWithOtp,
+// and always send the OTP to an email address — the employee code is
+// purely a lookup key, never sent to Supabase Auth directly.
+// _resolvedLoginEmail holds whichever email ends up being used so
+// doVerifyOtp() always verifies against the right address, regardless of
+// which input type was used to get there.
 let _resolvedLoginEmail = '';    // set once Send Code succeeds
 
-function setLoginMode(mode){
-  _loginMode = mode;
-  const emailBtn   = document.getElementById('mode-btn-email');
-  const codeBtn    = document.getElementById('mode-btn-empcode');
-  const emailGroup = document.getElementById('login-user').closest('.form-group');
-  const codeGroup  = document.getElementById('empcode-group');
-  const errEl      = document.getElementById('login-err');
-  if(errEl) errEl.textContent = '';
-
-  if(mode === 'empcode'){
-    emailBtn.classList.remove('active');
-    codeBtn.classList.add('active');
-    emailGroup.classList.add('hidden');
-    codeGroup.classList.remove('hidden');
-    document.getElementById('login-empcode').focus();
-  } else {
-    codeBtn.classList.remove('active');
-    emailBtn.classList.add('active');
-    codeGroup.classList.add('hidden');
-    emailGroup.classList.remove('hidden');
-    document.getElementById('login-user').focus();
-  }
+// Decide whether the typed value looks like an employee code or an email.
+// Returns 'email', 'empcode', or null if neither pattern matches.
+function _classifyLoginIdentifier(raw){
+  const s = (raw || '').trim();
+  if(!s) return null;
+  const isEmail   = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+  if(isEmail) return 'email';
+  const isEmpCode = /^[A-Za-z0-9]{5,6}$/.test(s);
+  if(isEmpCode) return 'empcode';
+  return null;
 }
 
 // Resolve an employee code to its tagged email via the
@@ -1203,12 +1159,18 @@ async function doSendOtp(){
 
   let emailRaw = '';
 
-  if(_loginMode === 'empcode'){
-    const codeRaw = document.getElementById('login-empcode').value.trim().toUpperCase();
-    if(!codeRaw){
-      errEl.textContent = 'Please enter your employee ID.';
-      return;
-    }
+  const identInp = document.getElementById('login-identifier');
+  const identRaw = (identInp ? identInp.value : '').trim();
+
+  if(!identRaw){
+    errEl.textContent = 'Please enter your Employee Code or Email Address.';
+    return;
+  }
+
+  const kind = _classifyLoginIdentifier(identRaw);
+
+  if(kind === 'empcode'){
+    const codeRaw = identRaw.toUpperCase();
 
     if(!_sbAuthClient) _sbAuthClient = buildSupabaseAuthClient();
     if(!_sbAuthClient){
@@ -1216,12 +1178,12 @@ async function doSendOtp(){
       return;
     }
 
-    errEl.textContent = '⏳ Looking up employee ID…';
+    errEl.textContent = '⏳ Looking up employee code…';
     errEl.style.color = '#94a3b8';
     try {
       const resolvedEmail = await _resolveEmployeeCodeToEmail(codeRaw);
       if(!resolvedEmail){
-        errEl.textContent = 'No account found for this employee ID. Contact an administrator.';
+        errEl.textContent = 'No account found for this employee code. Contact an administrator.';
         errEl.style.color = '';
         return;
       }
@@ -1231,16 +1193,11 @@ async function doSendOtp(){
       errEl.style.color = '';
       return;
     }
+  } else if(kind === 'email'){
+    emailRaw = identRaw;
   } else {
-    emailRaw = document.getElementById('login-user').value.trim();
-    if(!emailRaw){
-      errEl.textContent = 'Please enter your email.';
-      return;
-    }
-    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw)){
-      errEl.textContent = 'Please enter a valid email address.';
-      return;
-    }
+    errEl.textContent = 'Please enter a valid Employee Code or Email Address.';
+    return;
   }
 
   // Client-side cooldown check — give the user a clear "wait Ns" message
@@ -1296,7 +1253,7 @@ async function doSendOtp(){
     _startOtpCooldown(60, btn);
 
     // Remember which email the OTP actually went to — needed at verify time
-    // because in Employee ID mode, #login-user never holds an email at all.
+    // because when an employee code was typed, the input never held an email at all.
     _resolvedLoginEmail = emailRaw.toLowerCase();
 
     document.getElementById('otp-email-echo').textContent = emailRaw.toLowerCase();
@@ -1461,13 +1418,11 @@ function doResetOtpFlow(){
   // typed value.
   document.getElementById('step-otp').classList.add('hidden');
   document.getElementById('step-email').classList.remove('hidden');
-  document.getElementById('login-subtitle').textContent = 'Enter your email or employee code for OTP';
+  document.getElementById('login-subtitle').textContent = 'Enter your Employee Code or Email Address to sign in';
   document.getElementById('login-otp').value = '';
   document.getElementById('login-err').textContent = '';
   document.getElementById('login-err-otp').textContent = '';
-  const focusEl = _loginMode === 'empcode'
-    ? document.getElementById('login-empcode')
-    : document.getElementById('login-user');
+  const focusEl = document.getElementById('login-identifier');
   if(focusEl) focusEl.focus();
 }
 
@@ -1488,9 +1443,8 @@ async function doLogout(){
   try { sessionStorage.removeItem(SESSION_KEY); localStorage.removeItem(SESSION_KEY); } catch(e){}
   // Clear any pending auth handoff (no orphan creds for the next user)
   try { localStorage.removeItem(AUTH_HANDOFF_KEY); } catch(e){}
-  document.getElementById('login-user').value = '';
-  const empcodeInp = document.getElementById('login-empcode');
-  if(empcodeInp) empcodeInp.value = '';
+  const identInp = document.getElementById('login-identifier');
+  if(identInp) identInp.value = '';
   _resolvedLoginEmail = '';
   const otpInp = document.getElementById('login-otp');
   if(otpInp) otpInp.value = '';
@@ -2135,10 +2089,7 @@ document.addEventListener('keydown', e => {
   }
 });
 
-document.getElementById('login-user').addEventListener('keydown', e => {
-  if(e.key === 'Enter') doSendOtp();
-});
-document.getElementById('login-empcode').addEventListener('keydown', e => {
+document.getElementById('login-identifier').addEventListener('keydown', e => {
   if(e.key === 'Enter') doSendOtp();
 });
 document.getElementById('login-otp').addEventListener('keydown', e => {
@@ -2171,7 +2122,7 @@ async function init(){
     localStorage.removeItem(AUTH_HANDOFF_KEY);
   } catch(e){}
 
-  document.getElementById('login-user').focus();
+  document.getElementById('login-identifier').focus();
 }
 
 init();
