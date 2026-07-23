@@ -2525,11 +2525,13 @@ init();
   };
 
   // ══ PURCHASING BRANCH ACCESS ═══════════════════════════════════════════
-  // Same idea as Selling Branch access above, and the SAME physical branch
-  // list (DUROPLY.selling_branches is just the branch master — a company
-  // branch is one location regardless of which dashboard is asking) — but
-  // this is a COMPLETELY INDEPENDENT assignment. A user's Purchasing Branch
-  // access can differ entirely from their Selling Branch access.
+  // Same admin UI pattern as Selling Branch access above, but a DIFFERENT
+  // branch list and a COMPLETELY INDEPENDENT assignment:
+  //   · Branch list comes from DUROPLY.branch_master (NOT selling_branches —
+  //     that table is Selling-Branch-specific). branch_master is the
+  //     Purchasing Branch master used by the Purchase MIS Dashboard.
+  //   · A user's Purchasing Branch access can differ entirely from their
+  //     Selling Branch access.
   // Storage model (mirrors Selling Branch exactly, own dimension/column):
   //   · "DUROPLY".user_access_scopes — dimension='PURCHASING_BRANCH'.
   //     PK (user_auth_id, dimension) ⇒ every save is a clean UPSERT overwrite.
@@ -2537,6 +2539,79 @@ init();
   //     column from `branches`, which stays Selling-Branch-only) for the
   //     Purchase MIS Dashboard's legacy/fast-path reads.
   const BA_DIMENSION_PB='PURCHASING_BRANCH';
+
+  // Load the Purchasing Branch master from DUROPLY.branch_master (Active
+  // rows only). branch_master has no `zone` column — instead, the leading
+  // letter of `branch_code` encodes the zone (E0/E1/E2… = East, W… = West,
+  // N… = North, S… = South, C… = Central), so we derive zone from that
+  // prefix for the same grouped-by-zone display Selling Branch gets.
+  // Falls back to purchasing_branches assignments (not Selling Branch's
+  // `branches`) if the master table itself is unreadable.
+  // Returns [{name, zone}] sorted by zone then name.
+  const PB_ZONE_PREFIX_MAP = {E:'EAST', W:'WEST', F:'WEST', N:'NORTH', S:'SOUTH', C:'CENTRAL'}; // F = Rajkot factory (Gujarat) → West
+  function pbZoneFromCode(code){
+    const letter = (code||'').toString().trim().charAt(0).toUpperCase();
+    return PB_ZONE_PREFIX_MAP[letter] || '';
+  }
+  async function loadPurchasingBranchMaster(force){
+    if(ADM._pbranches && ADM._pbranches.length && !force) return ADM._pbranches;
+    const c=C(); if(!c) return (ADM._pbranches=[]);
+    ADM._pbranchLoadError=null;
+    // branch_master.disabled is a single char flag — treat any of Y/1/T
+    // (case-insensitive) as disabled; NULL or anything else counts as active.
+    const isDisabledFlag=(v)=>{
+      if(v==null) return false;
+      const s=String(v).trim().toUpperCase();
+      return s==='Y'||s==='1'||s==='T'||s==='TRUE';
+    };
+    const buildList=(data)=>{
+      const seen=new Map();
+      (data||[]).forEach(r=>{
+        const n=(r.branch_name||'').toString().trim(); if(!n) return;
+        if(isDisabledFlag(r.disabled)) return;
+        if(!seen.has(n.toUpperCase()))
+          seen.set(n.toUpperCase(),{name:n, zone:pbZoneFromCode(r.branch_code)});
+      });
+      return [...seen.values()].sort((a,b)=>(a.zone||'\uffff').localeCompare(b.zone||'\uffff')||a.name.localeCompare(b.name));
+    };
+    try{
+      const res=await c.from('branch_master').select('branch_name,branch_code,disabled').order('branch_name');
+      if(!res.error && Array.isArray(res.data)){
+        ADM._pbranches=buildList(res.data);
+        if(ADM._pbranches.length) return ADM._pbranches;
+        // Query succeeded but produced zero usable rows — either the table
+        // is genuinely empty, or every row is flagged disabled.
+        if(res.data.length){
+          ADM._pbranchLoadError = 'branch_master returned '+res.data.length+' row(s), but every one is flagged disabled (or branch_name is blank for all of them).';
+        }else{
+          ADM._pbranchLoadError = 'DUROPLY.branch_master returned 0 rows — the table is empty.';
+        }
+        return ADM._pbranches;
+      }
+      // The select itself failed — almost always an RLS policy blocking
+      // read access (the column names above now match the real schema).
+      // Surface the real Postgrest error, and separately probe with
+      // select('*') so we can confirm exactly what's readable.
+      let detail = (res.error && res.error.message) || 'unknown error';
+      try{
+        const probe = await c.from('branch_master').select('*').limit(1);
+        if(!probe.error && Array.isArray(probe.data) && probe.data.length){
+          detail += ' — columns readable via select(*): '+Object.keys(probe.data[0]).join(', ');
+        }else if(probe.error){
+          detail += ' (and a plain select(*) also failed: '+probe.error.message+' — check RLS policies on branch_master for this role)';
+        }
+      }catch(_){}
+      ADM._pbranchLoadError = detail;
+    }catch(e){
+      ADM._pbranchLoadError = (e && e.message) || String(e);
+    }
+    // Fallback: derive from existing user assignments (no zones available).
+    const set=new Map();
+    (ADM._users||[]).forEach(u=>(Array.isArray(u.purchasing_branches)?u.purchasing_branches:[]).forEach(b=>{
+      const n=(b||'').toString().trim(); if(n&&n.toUpperCase()!=='ALL'&&!set.has(n.toUpperCase()))set.set(n.toUpperCase(),{name:n,zone:''}); }));
+    ADM._pbranches=[...set.values()].sort((a,b)=>a.name.localeCompare(b.name));
+    return ADM._pbranches;
+  }
 
   async function renderPurchasingBranchAccess(){ const m=document.getElementById('adm-main');
     if(!ADM._users.length) await loadUsers();
@@ -2555,7 +2630,7 @@ init();
 
   async function drawPurchasingBranchAccess(u){ const c=C(); const body=document.getElementById('adm-pba-body');
     body.innerHTML='<div class="adm-lede">Loading…</div>';
-    const branches=await loadBranchMaster(); // same physical branch list as Selling
+    const branches=await loadPurchasingBranchMaster(); // DUROPLY.branch_master — Purchasing Branch master
     let allAccess=false, values=[];
     try{
       const sc=await c.from('user_access_scopes').select('all_access,allowed_values')
@@ -2593,7 +2668,7 @@ init();
         <button onclick="ADM.pbaSetAll(true)">Select all</button>
         <button onclick="ADM.pbaSetAll(false)">Clear</button>
         <span class="adm-ba-count" id="adm-pba-count"></span></div>
-      <div class="adm-ba-grid ${allAccess?'disabled':''}" id="adm-pba-grid">${boxes||'<div class="hint">No branches found. Add them in the dashboard\u2019s Branch Master (DUROPLY.selling_branches).</div>'}</div>
+      <div class="adm-ba-grid ${allAccess?'disabled':''}" id="adm-pba-grid">${boxes||('<div class="hint">No branches found.'+(ADM._pbranchLoadError?(' <strong>Reason:</strong> '+esc(ADM._pbranchLoadError)):' Add them in the Purchase dashboard\u2019s Branch Master (DUROPLY.branch_master).')+'</div>')}</div>
       <div class="hint" style="margin-top:10px">Tick a <strong>zone</strong> to select every branch under it in one click. Saving overwrites the user\u2019s previous purchasing-branch assignment (no duplicates are ever created) and mirrors it to their profile, so the Purchase dashboard picks it up on their next sign-in.</div>`;
     document.getElementById('adm-pba-save').style.display='';
     ADM.pbaCount();
