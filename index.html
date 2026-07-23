@@ -556,7 +556,6 @@
       <div class="login-err" id="login-err-otp"></div>
     </div>
 
-    <div class="cloud-status" id="cloud-status"><span class="dot"></span>Connecting to Supabase…</div>
   </div>
 </div>
 
@@ -665,6 +664,17 @@
 // CONFIGURATION
 // ════════════════════════════════════════════════════════════════
 
+// ── BUILD STAMP ─────────────────────────────────────────────────
+// Bump this string whenever this file changes and gets pushed to the
+// GitHub repo that serves srcduro.github.io. After deploying, open
+// DevTools → Console on the live site and confirm this line shows the
+// build you just pushed — the fastest way to rule out "am I actually
+// looking at the new file, or a stale cached/old copy?" without any
+// guesswork. GitHub Pages can take a minute or two to redeploy after a
+// push, and browsers can cache the old file even after that.
+const BUILD_STAMP = 'App Launcher build 2026-07-23 — Purchasing Branch access + cloud-status line removed from login';
+console.log('[BUILD]', BUILD_STAMP);
+
 // Supabase configuration (same project as Duroply_Sales_MIS_Dashboard.html).
 // Anon key is restricted by Row Level Security on the server.
 const SUPABASE_URL    = 'https://zzawutnztjfbdtvaohxm.supabase.co';
@@ -759,20 +769,21 @@ function describeSbError(err){
 }
 
 async function probeCloud(){
-  const statusEl = document.getElementById('cloud-status');
+  const statusEl = document.getElementById('cloud-status'); // removed from the login screen; guarded below
   if(!_sbClient){
-    statusEl.className = 'cloud-status err';
-    statusEl.innerHTML = '<span class="dot"></span>Supabase library unavailable — working offline';
+    if(statusEl){ statusEl.className = 'cloud-status err'; statusEl.innerHTML = '<span class="dot"></span>Supabase library unavailable — working offline'; }
     return false;
   }
   try {
     const { error } = await _sbClient.from(APPS_TABLE).select('id', { count: 'exact', head: true });
     if(error){
       _cloudReady = false;
-      statusEl.className = 'cloud-status err';
       const reason = describeSbError(error);
-      statusEl.innerHTML = '<span class="dot"></span>Cloud unreachable · ' + reason + ' — using local storage';
-      statusEl.title = reason;
+      if(statusEl){
+        statusEl.className = 'cloud-status err';
+        statusEl.innerHTML = '<span class="dot"></span>Cloud unreachable · ' + reason + ' — using local storage';
+        statusEl.title = reason;
+      }
       console.warn('[Supabase probe failed]', {
         message: error.message,
         code:    error.code,
@@ -782,16 +793,20 @@ async function probeCloud(){
       return false;
     }
     _cloudReady = true;
-    statusEl.className = 'cloud-status ok';
-    statusEl.innerHTML = '<span class="dot"></span>Connected · DUROPLY.' + APPS_TABLE;
-    statusEl.title = '';
+    if(statusEl){
+      statusEl.className = 'cloud-status ok';
+      statusEl.innerHTML = '<span class="dot"></span>Connected · DUROPLY.' + APPS_TABLE;
+      statusEl.title = '';
+    }
     return true;
   } catch(e){
     _cloudReady = false;
-    statusEl.className = 'cloud-status err';
     const reason = (e && e.message) ? e.message : String(e);
-    statusEl.innerHTML = '<span class="dot"></span>Cloud unreachable · ' + reason + ' — using local storage';
-    statusEl.title = reason;
+    if(statusEl){
+      statusEl.className = 'cloud-status err';
+      statusEl.innerHTML = '<span class="dot"></span>Cloud unreachable · ' + reason + ' — using local storage';
+      statusEl.title = reason;
+    }
     console.warn('[Supabase probe threw]', e);
     return false;
   }
