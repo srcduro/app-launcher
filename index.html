@@ -2186,6 +2186,7 @@ init();
       '<span class="grp">Access</span>'+
       `<button class="${ADM._view==='useraccess'?'active':''}" onclick="ADM.show('useraccess')">User access</button>`+
       `<button class="${ADM._view==='branchaccess'?'active':''}" onclick="ADM.show('branchaccess')">Selling branches</button>`+
+      `<button class="${ADM._view==='pbranchaccess'?'active':''}" onclick="ADM.show('pbranchaccess')">Purchasing branches</button>`+
       '<span class="grp">Bulk</span>'+
       `<button class="${ADM._view==='bydept'?'active':''}" onclick="ADM.show('bydept')">By department</button>`+
       `<button class="${ADM._view==='byrole'?'active':''}" onclick="ADM.show('byrole')">By role</button>`+
@@ -2195,6 +2196,7 @@ init();
     if(view==='users') renderUsers();
     else if(view==='useraccess') renderUserAccess();
     else if(view==='branchaccess') renderBranchAccess();
+    else if(view==='pbranchaccess') renderPurchasingBranchAccess();
     else if(view==='bydept') renderByDept();
     else if(view==='byrole') renderByRole();
     else if(view==='byusers') renderByUsers();
@@ -2209,8 +2211,9 @@ init();
     if(d.error||r.error) toast('Lookups failed — is uam_schema.sql deployed?',true);
   }
   async function loadUsers(){ const c=C(); if(!c){ADM._users=[];return;}
-    let cols='id,auth_id,name,email,role,branches,branch,department_id,role_id,is_active';
+    let cols='id,auth_id,name,email,role,branches,branch,purchasing_branches,department_id,role_id,is_active';
     let res=await c.from('user_profiles').select(cols).order('name');
+    if(res.error){ cols='id,auth_id,name,email,role,branches,branch,department_id,role_id,is_active'; res=await c.from('user_profiles').select(cols).order('name'); }
     if(res.error){ cols='id,auth_id,name,role,branches,branch,department_id,role_id,is_active'; res=await c.from('user_profiles').select(cols).order('name'); }
     if(res.error){ cols='id,auth_id,name,role,branches,branch'; res=await c.from('user_profiles').select(cols).order('name'); }
     ADM._users=(res.data)||[];
@@ -2518,6 +2521,134 @@ init();
       u.branches=mirrored.slice(); u.branch=mirrored[0]||'';
       logAccess('PERM_CHANGE',{scope:'selling_branch',auth_id:u.auth_id,all_access:all,branches:values});
       toast('Branch access updated for '+(u.name||u.email));
+    });
+  };
+
+  // ══ PURCHASING BRANCH ACCESS ═══════════════════════════════════════════
+  // Same idea as Selling Branch access above, and the SAME physical branch
+  // list (DUROPLY.selling_branches is just the branch master — a company
+  // branch is one location regardless of which dashboard is asking) — but
+  // this is a COMPLETELY INDEPENDENT assignment. A user's Purchasing Branch
+  // access can differ entirely from their Selling Branch access.
+  // Storage model (mirrors Selling Branch exactly, own dimension/column):
+  //   · "DUROPLY".user_access_scopes — dimension='PURCHASING_BRANCH'.
+  //     PK (user_auth_id, dimension) ⇒ every save is a clean UPSERT overwrite.
+  //   · user_profiles.purchasing_branches is mirrored on save (separate
+  //     column from `branches`, which stays Selling-Branch-only) for the
+  //     Purchase MIS Dashboard's legacy/fast-path reads.
+  const BA_DIMENSION_PB='PURCHASING_BRANCH';
+
+  async function renderPurchasingBranchAccess(){ const m=document.getElementById('adm-main');
+    if(!ADM._users.length) await loadUsers();
+    m.innerHTML=`<div class="adm-panel"><h2>Purchasing branch access</h2>
+      <div class="adm-lede">Restrict which <strong>Purchasing Branches</strong> a user can see in the Purchase MIS Dashboard. This is independent of their Selling Branch access — the same branch list, a separate assignment. Pick a user, tick their branches (or “All branches”), then save.</div>
+      <div class="adm-bar"><div class="grow"><select id="adm-pba-user" onchange="ADM.pickPbaUser()">
+        <option value="">— choose a user —</option>${ADM._users.map((u,i)=>`<option value="${i}" ${i===ADM._pbaIdx?'selected':''}>${esc(u.name||u.email||u.auth_id)}</option>`).join('')}
+      </select></div>
+      <button class="primary" id="adm-pba-save" style="display:none" onclick="ADM.savePurchasingBranchAccess()">Save branches</button></div>
+      <div id="adm-pba-body"></div></div>`;
+    if(ADM._pbaIdx!=null && ADM._users[ADM._pbaIdx]) drawPurchasingBranchAccess(ADM._users[ADM._pbaIdx]);
+  }
+  ADM.pickPbaUser=function(){ const v=document.getElementById('adm-pba-user').value; ADM._pbaIdx=v===''?null:+v;
+    if(ADM._pbaIdx==null){ document.getElementById('adm-pba-body').innerHTML=''; document.getElementById('adm-pba-save').style.display='none'; return; }
+    drawPurchasingBranchAccess(ADM._users[ADM._pbaIdx]); };
+
+  async function drawPurchasingBranchAccess(u){ const c=C(); const body=document.getElementById('adm-pba-body');
+    body.innerHTML='<div class="adm-lede">Loading…</div>';
+    const branches=await loadBranchMaster(); // same physical branch list as Selling
+    let allAccess=false, values=[];
+    try{
+      const sc=await c.from('user_access_scopes').select('all_access,allowed_values')
+        .eq('user_auth_id',u.auth_id).eq('dimension',BA_DIMENSION_PB).maybeSingle();
+      if(sc.error && !/relation|does not exist|schema cache/i.test(sc.error.message||'')) throw sc.error;
+      if(sc.data){ allAccess=!!sc.data.all_access; values=Array.isArray(sc.data.allowed_values)?sc.data.allowed_values:[]; }
+      else{ // legacy fallback — NULL/'ALL' means unrestricted, [] means none
+        const brs=Array.isArray(u.purchasing_branches)?u.purchasing_branches:null;
+        if(brs===null || brs.includes('ALL')) allAccess=true;
+        else values=brs.slice();
+      }
+    }catch(e){ body.innerHTML='<div class="adm-note">Could not load current assignment: '+esc(e.message||String(e))+'<br>Has the <strong>purchasing_branches</strong> column / <strong>PURCHASING_BRANCH</strong> dimension been added yet? See add_purchasing_branches_column.sql.</div>'; return; }
+    ADM._pbaOrig={all:allAccess, values:values.slice()};
+
+    const r=roleById(u.role_id);
+    const adminNote=(u.role==='admin'||u.role==='super_user'||(r&&r.grants_all))
+      ? '<div class="adm-note">ℹ This user has an <strong>admin / all-access role</strong>, so dashboards ignore branch restrictions for them. You can still record an assignment below; it takes effect if their role is ever downgraded.</div>' : '';
+    const sel=new Set(values.map(v=>v.toUpperCase()));
+    const groups=new Map();
+    branches.forEach(b=>{ const z=b.zone||''; if(!groups.has(z))groups.set(z,[]); groups.get(z).push(b); });
+    const zoneKeys=[...groups.keys()].sort((a,b)=>(a||'\uffff').localeCompare(b||'\uffff'));
+    const boxes=zoneKeys.map((z,zi)=>{
+      const zid='z'+zi; const list=groups.get(z);
+      const rows=list.map(b=>`<label data-zone="${zid}"><input type="checkbox" class="adm-ba-cb" data-zone="${zid}" value="${esc(b.name)}" ${sel.has(b.name.toUpperCase())?'checked':''} onchange="ADM.pbaCount()"> ${esc(b.name)}</label>`).join('');
+      return `<div class="adm-ba-zone" data-zone="${zid}" data-zname="${esc(z||'UNASSIGNED')}">
+        <label class="adm-ba-zhead"><input type="checkbox" class="adm-ba-zcb" data-zone="${zid}" onchange="ADM.pbaToggleZone(this)">
+          🗺 ${esc(z||'UNASSIGNED ZONE')} <span class="adm-ba-zn" data-zone="${zid}"></span></label>
+        <div class="adm-ba-zgrid">${rows}</div></div>`;
+    }).join('');
+    body.innerHTML=`${adminNote}
+      <label class="adm-ba-all"><input type="checkbox" id="adm-pba-all" ${allAccess?'checked':''} onchange="ADM.pbaToggleAll()">
+        🏢 All branches — unrestricted access (bypasses branch filtering)</label>
+      <div class="adm-ba-tools">
+        <input id="adm-pba-search" placeholder="Search branches or zones…" oninput="ADM.pbaFilter()">
+        <button onclick="ADM.pbaSetAll(true)">Select all</button>
+        <button onclick="ADM.pbaSetAll(false)">Clear</button>
+        <span class="adm-ba-count" id="adm-pba-count"></span></div>
+      <div class="adm-ba-grid ${allAccess?'disabled':''}" id="adm-pba-grid">${boxes||'<div class="hint">No branches found. Add them in the dashboard\u2019s Branch Master (DUROPLY.selling_branches).</div>'}</div>
+      <div class="hint" style="margin-top:10px">Tick a <strong>zone</strong> to select every branch under it in one click. Saving overwrites the user\u2019s previous purchasing-branch assignment (no duplicates are ever created) and mirrors it to their profile, so the Purchase dashboard picks it up on their next sign-in.</div>`;
+    document.getElementById('adm-pba-save').style.display='';
+    ADM.pbaCount();
+  }
+  ADM.pbaToggleAll=function(){ const all=document.getElementById('adm-pba-all').checked;
+    document.getElementById('adm-pba-grid').classList.toggle('disabled',all); ADM.pbaCount(); };
+  ADM.pbaToggleZone=function(zcb){ const z=zcb.getAttribute('data-zone'); const on=zcb.checked;
+    document.querySelectorAll('#adm-pba-grid .adm-ba-cb[data-zone="'+z+'"]').forEach(cb=>cb.checked=on); ADM.pbaCount(); };
+  ADM.pbaSetAll=function(on){ document.querySelectorAll('#adm-pba-grid .adm-ba-cb').forEach(cb=>{ if(cb.closest('label').style.display!=='none') cb.checked=on; }); ADM.pbaCount(); };
+  ADM.pbaFilter=function(){ const q=(document.getElementById('adm-pba-search').value||'').toUpperCase();
+    document.querySelectorAll('#adm-pba-grid .adm-ba-zone').forEach(sec=>{
+      const zname=(sec.getAttribute('data-zname')||'').toUpperCase();
+      const zoneHit=!q||zname.includes(q);
+      let visible=0;
+      sec.querySelectorAll('.adm-ba-zgrid label').forEach(l=>{
+        const show=zoneHit||l.textContent.toUpperCase().includes(q);
+        l.style.display=show?'':'none'; if(show)visible++;
+      });
+      sec.style.display=visible?'':'none';
+    }); };
+  ADM.pbaCount=function(){ const el=document.getElementById('adm-pba-count'); if(!el)return;
+    document.querySelectorAll('#adm-pba-grid .adm-ba-zcb').forEach(zcb=>{
+      const z=zcb.getAttribute('data-zone');
+      const cbs=[...document.querySelectorAll('#adm-pba-grid .adm-ba-cb[data-zone="'+z+'"]')];
+      const on=cbs.filter(c=>c.checked).length;
+      zcb.checked=on>0&&on===cbs.length; zcb.indeterminate=on>0&&on<cbs.length;
+      const n=document.querySelector('#adm-pba-grid .adm-ba-zn[data-zone="'+z+'"]');
+      if(n)n.textContent='('+on+'/'+cbs.length+')';
+    });
+    if(document.getElementById('adm-pba-all').checked){ el.textContent='All branches'; return; }
+    const n=document.querySelectorAll('#adm-pba-grid .adm-ba-cb:checked').length;
+    el.textContent=n+' of '+document.querySelectorAll('#adm-pba-grid .adm-ba-cb').length+' selected'; };
+
+  ADM.savePurchasingBranchAccess=async function(){ const c=C(); const u=ADM._users[ADM._pbaIdx]; if(!u||!c)return;
+    const all=document.getElementById('adm-pba-all').checked;
+    const values=all?[]:[...document.querySelectorAll('#adm-pba-grid .adm-ba-cb:checked')].map(cb=>cb.value);
+    if(!all && !values.length){
+      if(!confirm('No branches are selected. '+(u.name||u.email)+' will see NO purchase data until branches are assigned.\n\nSave anyway?')) return;
+    }
+    const o=ADM._pbaOrig||{all:false,values:[]};
+    if(o.all===all && o.values.length===values.length && o.values.every(v=>values.includes(v))){ toast('No changes to save'); return; }
+    const cb=(me()&&me().auth_id)||null;
+    const mirrored=all?['ALL']:values.slice();
+    const ops=[
+      c.from('user_access_scopes').upsert(
+        {user_auth_id:u.auth_id, dimension:BA_DIMENSION_PB, all_access:all, allowed_values:values, updated_by:cb, updated_at:new Date().toISOString()},
+        {onConflict:'user_auth_id,dimension'}),
+      // Own column — never touches `branches`/`branch` (Selling Branch).
+      c.from('user_profiles').update({purchasing_branches:mirrored}).eq('auth_id',u.auth_id)
+    ];
+    await runOps(ops,()=>{
+      ADM._pbaOrig={all, values:values.slice()};
+      u.purchasing_branches=mirrored.slice();
+      logAccess('PERM_CHANGE',{scope:'purchasing_branch',auth_id:u.auth_id,all_access:all,branches:values});
+      toast('Purchasing branch access updated for '+(u.name||u.email));
     });
   };
 
