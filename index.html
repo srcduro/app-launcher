@@ -2929,11 +2929,31 @@ init();
   function drawMenuByUser(u){
     const body=document.getElementById('adm-mu-body');
     const grant=rulesForScope('user_id',u.id); ADM._menuOrig=Object.assign({},grant);
-    const rows=SALES_MENUS.map(item=>menuRow(item,!!grant[item.key])).join('');
-    body.innerHTML=`<div class="adm-scroll"><table class="adm-pgrid"><thead><tr>${menuHeader()}</tr></thead><tbody>${rows}</tbody></table></div>
-      <div class="hint">Ticked = this user always sees this tab, regardless of department/role. Unticking removes their personal override (their department/role/designation rules, or the all-visible default, then apply).</div>`;
+    const allChecked=SALES_MENUS.every(item=>!!grant[item.key]);
+    const rows=SALES_MENUS.map(item=>
+      `<tr><td class="nm">${esc(item.label)}</td><td style="text-align:center"><input type="checkbox" data-menu="${item.key}" ${grant[item.key]?'checked':''} onchange="ADM.syncMenuUserSelectAll()"></td></tr>`
+    ).join('');
+    body.innerHTML=`<div class="adm-scroll"><table class="adm-pgrid"><thead><tr>${menuHeader()}</tr>
+        <tr class="adm-selectall-row" style="background:#faf8f0"><td class="nm" style="font-weight:700">Select All</td>
+          <td style="text-align:center"><input type="checkbox" id="adm-mu-selectall" ${allChecked?'checked':''} onchange="ADM.toggleMenuUserSelectAll(this)"></td></tr>
+        </thead><tbody>${rows}</tbody></table></div>
+      <div class="hint">Ticked = this user always sees this tab, regardless of department/role. Unticking removes their personal override (their department/role/designation rules, or the all-visible default, then apply). Use <strong>Select All</strong> to tick every tab, then untick just the few this user should NOT see.</div>`;
     document.getElementById('adm-mu-save').style.display='';
+    ADM.syncMenuUserSelectAll();
   }
+  // Select-All → sets every individual checkbox in the By-User checklist to match.
+  ADM.toggleMenuUserSelectAll=function(cb){
+    document.querySelectorAll('#adm-mu-body input[type=checkbox][data-menu]').forEach(x=>{ x.checked=cb.checked; });
+  };
+  // Any individual checkbox change → re-derive Select-All's checked/indeterminate state.
+  ADM.syncMenuUserSelectAll=function(){
+    const boxes=document.querySelectorAll('#adm-mu-body input[type=checkbox][data-menu]');
+    const all=document.getElementById('adm-mu-selectall'); if(!all) return;
+    const total=boxes.length; let checkedCount=0;
+    boxes.forEach(x=>{ if(x.checked) checkedCount++; });
+    all.checked=(checkedCount===total);
+    all.indeterminate=(checkedCount>0 && checkedCount<total);
+  };
   ADM.saveMenuUser=async function(){ const u=ADM._users[ADM._menuUserIdx]; if(!u)return;
     await saveMenuScope('user_id',u.id,'#adm-mu-body','Menu access updated for '+(u.name||u.email)); };
 
