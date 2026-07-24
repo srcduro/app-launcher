@@ -2157,8 +2157,9 @@ init();
   'use strict';
   const PERMS=[{bit:1,ab:'V',label:'View'},{bit:2,ab:'C',label:'Create'},{bit:4,ab:'E',label:'Edit'},
     {bit:8,ab:'D',label:'Delete'},{bit:16,ab:'X',label:'Export'},{bit:32,ab:'Ap',label:'Approve'},{bit:64,ab:'Ad',label:'Admin'}];
-  const ADM={ _built:false, _view:'users', _departments:[], _roles:[], _users:[], _accessIdx:null,
-              _uaOrig:{}, _bdOrig:{}, _brOrig:{}, _baIdx:null, _baOrig:null, _branches:null };
+  const ADM={ _built:false, _view:'users', _departments:[], _roles:[], _designations:[], _users:[], _accessIdx:null,
+              _uaOrig:{}, _bdOrig:{}, _brOrig:{}, _baIdx:null, _baOrig:null, _branches:null,
+              _menuRules:null, _menuUserIdx:null, _menuDeptId:null, _menuDesigId:null, _menuRoleId:null, _menuOrig:{} };
   window.ADM=ADM;
 
   // ── plumbing ──────────────────────────────────────────────────────────────
@@ -2172,6 +2173,10 @@ init();
   function deptName(id){ const d=ADM._departments.find(x=>x.id===id); return d?d.name:'—'; }
   function roleName(id){ const r=ADM._roles.find(x=>x.id===id); return r?r.name:'—'; }
   function roleById(id){ return ADM._roles.find(x=>x.id===id); }
+  function designationName(id){ const g=ADM._designations.find(x=>x.id===id); return g?g.name:'—'; }
+  function designationOptions(deptId,sel){
+    const list=deptId?ADM._designations.filter(x=>x.department_id===deptId):ADM._designations;
+    return '<option value="">— designation —</option>'+list.map(g=>`<option value="${g.id}" ${g.id===sel?'selected':''}>${esc(g.name)}</option>`).join(''); }
   function isUuid(s){ return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s||''); }
   function deptOptions(sel){ return '<option value="">— department —</option>'+ADM._departments.map(d=>`<option value="${d.id}" ${d.id===sel?'selected':''}>${esc(d.name)}</option>`).join(''); }
   function roleOptions(sel){ return '<option value="">— role —</option>'+ADM._roles.map(r=>`<option value="${r.id}" ${r.id===sel?'selected':''}>${esc(r.name)}</option>`).join(''); }
@@ -2202,6 +2207,11 @@ init();
       `<button class="${ADM._view==='useraccess'?'active':''}" onclick="ADM.show('useraccess')">User access</button>`+
       `<button class="${ADM._view==='branchaccess'?'active':''}" onclick="ADM.show('branchaccess')">Selling branches</button>`+
       `<button class="${ADM._view==='pbranchaccess'?'active':''}" onclick="ADM.show('pbranchaccess')">Purchasing branches</button>`+
+      '<span class="grp">Sales dashboard menus</span>'+
+      `<button class="${ADM._view==='menuuser'?'active':''}" onclick="ADM.show('menuuser')">By user</button>`+
+      `<button class="${ADM._view==='menudept'?'active':''}" onclick="ADM.show('menudept')">By department</button>`+
+      `<button class="${ADM._view==='menudesig'?'active':''}" onclick="ADM.show('menudesig')">By designation</button>`+
+      `<button class="${ADM._view==='menurole'?'active':''}" onclick="ADM.show('menurole')">By role</button>`+
       '<span class="grp">Bulk</span>'+
       `<button class="${ADM._view==='bydept'?'active':''}" onclick="ADM.show('bydept')">By department</button>`+
       `<button class="${ADM._view==='byrole'?'active':''}" onclick="ADM.show('byrole')">By role</button>`+
@@ -2212,6 +2222,10 @@ init();
     else if(view==='useraccess') renderUserAccess();
     else if(view==='branchaccess') renderBranchAccess();
     else if(view==='pbranchaccess') renderPurchasingBranchAccess();
+    else if(view==='menuuser') renderMenuByUser();
+    else if(view==='menudept') renderMenuByDept();
+    else if(view==='menudesig') renderMenuByDesignation();
+    else if(view==='menurole') renderMenuByRole();
     else if(view==='bydept') renderByDept();
     else if(view==='byrole') renderByRole();
     else if(view==='byusers') renderByUsers();
@@ -2219,10 +2233,11 @@ init();
 
   // ── lookups & users ───────────────────────────────────────────────────────
   async function loadLookups(){ const c=C(); if(!c)return;
-    const [d,r]=await Promise.all([
+    const [d,r,de]=await Promise.all([
       c.from('departments').select('id,code,name').eq('is_active',true).order('name'),
-      c.from('roles').select('id,code,name,level,grants_all').eq('is_active',true).order('level')]);
-    ADM._departments=(d.data)||[]; ADM._roles=(r.data)||[];
+      c.from('roles').select('id,code,name,level,grants_all').eq('is_active',true).order('level'),
+      c.from('designations').select('id,department_id,code,name').eq('is_active',true).order('name')]);
+    ADM._departments=(d.data)||[]; ADM._roles=(r.data)||[]; ADM._designations=(de.data)||[];
     if(d.error||r.error) toast('Lookups failed — is uam_schema.sql deployed?',true);
   }
   async function loadUsers(){ const c=C(); if(!c){ADM._users=[];return;}
@@ -2818,6 +2833,183 @@ init();
       if(mode==='grant') ops.push(c.from('user_app_access').upsert({user_auth_id:u.auth_id,app_id:aid,perms_grant:perms,created_by:cb},{onConflict:'user_auth_id,app_id'}));
       else               ops.push(c.from('user_app_access').delete().eq('user_auth_id',u.auth_id).eq('app_id',aid)); }));
     await runOps(ops,()=>{ logAccess('PERM_CHANGE',{scope:'bulk_users',mode,users:users.map(u=>u.auth_id),apps:appIds,perms}); toast((mode==='grant'?'Granted to ':'Removed from ')+users.length+' user'+(users.length>1?'s':'')); }); };
+  // ══ SALES DASHBOARD MENU ACCESS ═════════════════════════════════════════
+  // Governs which of the 14 report tabs in Duroply_Sales_MIS_Dashboard.html
+  // a user sees. Storage: "DUROPLY".menu_access_rules — one row per grant,
+  // with user_id / department_id / designation_id / role_id as independent,
+  // optional (nullable) match columns. A rule matches a user when every
+  // non-null column on it equals that user's corresponding attribute; a menu
+  // is visible to that user if AT LEAST ONE rule matches it. If a user has
+  // ZERO matching rules anywhere in the table, every menu stays visible
+  // (opt-in restriction, never a silent lockout) — this mirrors exactly what
+  // Duroply_Sales_MIS_Dashboard.html's own getVisibleMenuKeys() does.
+  //
+  // This admin UI manages the four dimensions independently (one screen per
+  // dimension), writing single-dimension rows (only one of the four match
+  // columns set per row) — the simple, common case. The underlying schema
+  // still supports combination rows (e.g. a row with BOTH user_id AND
+  // department_id set) for advanced one-off cases; those can be added
+  // directly in Supabase if ever needed, without any change here.
+  const MENU_ACCESS_TABLE='menu_access_rules';
+  const SALES_MENUS=[
+    {key:'tab-source',       label:'Source Wise Analysis'},
+    {key:'tab-segment',      label:'Segment Wise Analysis'},
+    {key:'tab-custmonthly',  label:'Customer Monthly (Multi-FY)'},
+    {key:'tab-branchmonthly',label:'Branch wise Monthly (Multi FY)'},
+    {key:'tab-custcat',      label:'Customer Type Analysis'},
+    {key:'tab-monthly',      label:'Month & Zone Wise Sales'},
+    {key:'tab-brand',        label:'Brand Performance'},
+    {key:'tab-product',      label:'Product & Area'},
+    {key:'tab-customers',    label:'Chart Toppers'},
+    {key:'tab-tod',          label:'T.O.D. Report'},
+    {key:'tab-collection',   label:'Sales-Collection-O/S'},
+    {key:'tab-ageing',       label:'Ageing O/S & Collection Planning'},
+    {key:'tab-drill',        label:'Customer Drill Down'},
+    {key:'tab-drillbranch',  label:'Branch Drill Down'}
+  ];
+  async function loadMenuRules(force){
+    if(ADM._menuRules && !force) return ADM._menuRules;
+    const c=C(); if(!c) return (ADM._menuRules=[]);
+    const {data,error}=await c.from(MENU_ACCESS_TABLE).select('id,menu_key,user_id,department_id,designation_id,role_id');
+    if(error){ toast('Menu rules failed to load — is menu_access_rules deployed?',true); ADM._menuRules=[]; }
+    else ADM._menuRules=data||[];
+    return ADM._menuRules;
+  }
+  function menuHeader(){ return '<th class="nm">Report Tab</th><th style="text-align:center">Visible</th>'; }
+  function menuRow(item,checked){
+    return `<tr><td class="nm">${esc(item.label)}</td><td style="text-align:center"><input type="checkbox" data-menu="${item.key}" ${checked?'checked':''}></td></tr>`; }
+  function collectMenuChecklist(sel){
+    const m={}; document.querySelectorAll(sel+' input[type=checkbox][data-menu]').forEach(cb=>{ m[cb.getAttribute('data-menu')]=cb.checked; }); return m; }
+  // Generic save: diffs the checklist against ADM._menuOrig (rule ids keyed
+  // by menu_key for THIS scope), inserting/deleting only what changed.
+  async function saveMenuScope(matchCol,matchVal,bodySel,afterMsg){
+    const c=C(); const desired=collectMenuChecklist(bodySel);
+    const orig=ADM._menuOrig||{}; const ops=[];
+    const cb=(_currentUser&&_currentUser.auth_id)||null;
+    Object.keys(desired).forEach(key=>{
+      const now=!!desired[key], was=!!orig[key];
+      if(now===was) return;
+      if(now){
+        const row={menu_key:key, user_id:null, department_id:null, designation_id:null, role_id:null, created_by:cb};
+        row[matchCol]=matchVal;
+        ops.push(c.from(MENU_ACCESS_TABLE).insert(row));
+      }else{
+        const existingRow=(ADM._menuRules||[]).find(r=>r.menu_key===key && r[matchCol]===matchVal &&
+          ['user_id','department_id','designation_id','role_id'].every(k=>k===matchCol?true:(r[k]==null)));
+        const existingId=existingRow?existingRow.id:null;
+        if(existingId!=null) ops.push(c.from(MENU_ACCESS_TABLE).delete().eq('id',existingId));
+      }
+    });
+    if(!ops.length){ toast('No changes to save'); return; }
+    await runOps(ops,async ()=>{ await loadMenuRules(true); toast(afterMsg); logAccess('MENU_ACCESS_CHANGE',{scope:matchCol,value:matchVal,menus:desired}); });
+  }
+  function rulesForScope(matchCol,matchVal){
+    const others=['user_id','department_id','designation_id','role_id'].filter(k=>k!==matchCol);
+    const map={};
+    (ADM._menuRules||[]).filter(r=>r[matchCol]===matchVal && others.every(k=>r[k]==null))
+      .forEach(r=>{ map[r.menu_key]=true; });
+    return map;
+  }
+
+  // ── by user ──────────────────────────────────────────────────────────────
+  async function renderMenuByUser(){ const m=document.getElementById('adm-main');
+    if(!ADM._users.length) await loadUsers();
+    const opts='<option value="">— choose a user —</option>'+ADM._users.map((u,i)=>`<option value="${i}" ${i===ADM._menuUserIdx?'selected':''}>${esc(u.name||u.email||u.auth_id)}</option>`).join('');
+    m.innerHTML=`<div class="adm-panel"><h2>Sales dashboard menus — by user</h2>
+      <div class="adm-lede">Restrict which report tabs a specific user sees in the Sales MIS Dashboard. If a user has no menu rule at all (here, by department, designation, or role), they see every tab — this only takes effect once you tick/untick something below.</div>
+      <div class="adm-bar"><div class="grow"><select id="adm-mu-user" onchange="ADM.pickMenuUser()">${opts}</select></div>
+        <button class="primary" id="adm-mu-save" style="display:none" onclick="ADM.saveMenuUser()">Save</button></div>
+      <div id="adm-mu-body"></div></div>`;
+    await loadMenuRules();
+    if(ADM._menuUserIdx!=null && ADM._users[ADM._menuUserIdx]) drawMenuByUser(ADM._users[ADM._menuUserIdx]);
+  }
+  ADM.pickMenuUser=function(){ const v=document.getElementById('adm-mu-user').value; ADM._menuUserIdx=v===''?null:+v;
+    if(ADM._menuUserIdx==null){ document.getElementById('adm-mu-body').innerHTML=''; document.getElementById('adm-mu-save').style.display='none'; return; }
+    drawMenuByUser(ADM._users[ADM._menuUserIdx]); };
+  function drawMenuByUser(u){
+    const body=document.getElementById('adm-mu-body');
+    const grant=rulesForScope('user_id',u.id); ADM._menuOrig=Object.assign({},grant);
+    const rows=SALES_MENUS.map(item=>menuRow(item,!!grant[item.key])).join('');
+    body.innerHTML=`<div class="adm-scroll"><table class="adm-pgrid"><thead><tr>${menuHeader()}</tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="hint">Ticked = this user always sees this tab, regardless of department/role. Unticking removes their personal override (their department/role/designation rules, or the all-visible default, then apply).</div>`;
+    document.getElementById('adm-mu-save').style.display='';
+  }
+  ADM.saveMenuUser=async function(){ const u=ADM._users[ADM._menuUserIdx]; if(!u)return;
+    await saveMenuScope('user_id',u.id,'#adm-mu-body','Menu access updated for '+(u.name||u.email)); };
+
+  // ── by department ────────────────────────────────────────────────────────
+  async function renderMenuByDept(){ const m=document.getElementById('adm-main');
+    const opts='<option value="">— choose a department —</option>'+ADM._departments.map(d=>`<option value="${d.id}" ${d.id===ADM._menuDeptId?'selected':''}>${esc(d.name)}</option>`).join('');
+    m.innerHTML=`<div class="adm-panel"><h2>Sales dashboard menus — by department</h2>
+      <div class="adm-lede">Grant every user in a department visibility to specific report tabs. Applies to anyone with this department set on their profile, on top of any personal or role-based grants.</div>
+      <div class="adm-bar"><div class="grow"><select id="adm-md-dept" onchange="ADM.pickMenuDept()">${opts}</select></div>
+        <button class="primary" id="adm-md-save" style="display:none" onclick="ADM.saveMenuDept()">Save</button></div>
+      <div id="adm-md-body"></div></div>`;
+    await loadMenuRules();
+    if(ADM._menuDeptId!=null) drawMenuByDept(ADM._menuDeptId);
+  }
+  ADM.pickMenuDept=function(){ const v=document.getElementById('adm-md-dept').value; ADM._menuDeptId=v===''?null:+v;
+    if(ADM._menuDeptId==null){ document.getElementById('adm-md-body').innerHTML=''; document.getElementById('adm-md-save').style.display='none'; return; }
+    drawMenuByDept(ADM._menuDeptId); };
+  function drawMenuByDept(deptId){
+    const body=document.getElementById('adm-md-body');
+    const grant=rulesForScope('department_id',deptId); ADM._menuOrig=Object.assign({},grant);
+    const rows=SALES_MENUS.map(item=>menuRow(item,!!grant[item.key])).join('');
+    body.innerHTML=`<div class="adm-scroll"><table class="adm-pgrid"><thead><tr>${menuHeader()}</tr></thead><tbody>${rows}</tbody></table></div>`;
+    document.getElementById('adm-md-save').style.display='';
+  }
+  ADM.saveMenuDept=async function(){ const deptId=ADM._menuDeptId; if(deptId==null)return;
+    await saveMenuScope('department_id',deptId,'#adm-md-body','Menu access updated for '+deptName(deptId)); };
+
+  // ── by designation ───────────────────────────────────────────────────────
+  async function renderMenuByDesignation(){ const m=document.getElementById('adm-main');
+    const opts='<option value="">— choose a designation —</option>'+ADM._designations.map(g=>`<option value="${g.id}" ${g.id===ADM._menuDesigId?'selected':''}>${esc(g.name)}${g.department_id?' ('+esc(deptName(g.department_id))+')':''}</option>`).join('');
+    m.innerHTML=`<div class="adm-panel"><h2>Sales dashboard menus — by designation</h2>
+      <div class="adm-lede">Grant every user with a specific job designation visibility to specific report tabs.</div>
+      <div class="adm-bar"><div class="grow"><select id="adm-mg-desig" onchange="ADM.pickMenuDesig()">${opts}</select></div>
+        <button class="primary" id="adm-mg-save" style="display:none" onclick="ADM.saveMenuDesig()">Save</button></div>
+      <div id="adm-mg-body"></div></div>`;
+    await loadMenuRules();
+    if(ADM._menuDesigId!=null) drawMenuByDesignation(ADM._menuDesigId);
+  }
+  ADM.pickMenuDesig=function(){ const v=document.getElementById('adm-mg-desig').value; ADM._menuDesigId=v===''?null:+v;
+    if(ADM._menuDesigId==null){ document.getElementById('adm-mg-body').innerHTML=''; document.getElementById('adm-mg-save').style.display='none'; return; }
+    drawMenuByDesignation(ADM._menuDesigId); };
+  function drawMenuByDesignation(desigId){
+    const body=document.getElementById('adm-mg-body');
+    const grant=rulesForScope('designation_id',desigId); ADM._menuOrig=Object.assign({},grant);
+    const rows=SALES_MENUS.map(item=>menuRow(item,!!grant[item.key])).join('');
+    body.innerHTML=`<div class="adm-scroll"><table class="adm-pgrid"><thead><tr>${menuHeader()}</tr></thead><tbody>${rows}</tbody></table></div>`;
+    document.getElementById('adm-mg-save').style.display='';
+  }
+  ADM.saveMenuDesig=async function(){ const desigId=ADM._menuDesigId; if(desigId==null)return;
+    await saveMenuScope('designation_id',desigId,'#adm-mg-body','Menu access updated for '+designationName(desigId)); };
+
+  // ── by role ──────────────────────────────────────────────────────────────
+  async function renderMenuByRole(){ const m=document.getElementById('adm-main');
+    const opts='<option value="">— choose a role —</option>'+ADM._roles.map(r=>`<option value="${r.id}" ${r.id===ADM._menuRoleId?'selected':''}>${esc(r.name)}</option>`).join('');
+    m.innerHTML=`<div class="adm-panel"><h2>Sales dashboard menus — by role</h2>
+      <div class="adm-lede">Grant every user with a specific role visibility to specific report tabs. Note: a role flagged <strong>grants_all</strong> already bypasses menu restrictions entirely (sees everything) — assigning tabs here has no effect for that role.</div>
+      <div class="adm-bar"><div class="grow"><select id="adm-mr-role" onchange="ADM.pickMenuRole()">${opts}</select></div>
+        <button class="primary" id="adm-mr-save" style="display:none" onclick="ADM.saveMenuRole()">Save</button></div>
+      <div id="adm-mr-body"></div></div>`;
+    await loadMenuRules();
+    if(ADM._menuRoleId!=null) drawMenuByRole(ADM._menuRoleId);
+  }
+  ADM.pickMenuRole=function(){ const v=document.getElementById('adm-mr-role').value; ADM._menuRoleId=v===''?null:+v;
+    if(ADM._menuRoleId==null){ document.getElementById('adm-mr-body').innerHTML=''; document.getElementById('adm-mr-save').style.display='none'; return; }
+    drawMenuByRole(ADM._menuRoleId); };
+  function drawMenuByRole(roleId){
+    const body=document.getElementById('adm-mr-body');
+    const r=roleById(roleId);
+    const grant=rulesForScope('role_id',roleId); ADM._menuOrig=Object.assign({},grant);
+    const rows=SALES_MENUS.map(item=>menuRow(item,!!grant[item.key])).join('');
+    const bypassNote=(r&&r.grants_all)?'<div class="adm-note">This role has <strong>grants_all</strong> — it already sees every tab regardless of what\'s ticked below.</div>':'';
+    body.innerHTML=bypassNote+`<div class="adm-scroll"><table class="adm-pgrid"><thead><tr>${menuHeader()}</tr></thead><tbody>${rows}</tbody></table></div>`;
+    document.getElementById('adm-mr-save').style.display='';
+  }
+  ADM.saveMenuRole=async function(){ const roleId=ADM._menuRoleId; if(roleId==null)return;
+    await saveMenuScope('role_id',roleId,'#adm-mr-body','Menu access updated for '+roleName(roleId)); };
 })();
 </script>
 
