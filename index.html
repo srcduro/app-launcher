@@ -1305,7 +1305,7 @@ async function doVerifyOtp(){
     // Fetch the matching profile row (same query as the old password flow).
     const { data: profile, error: profErr } = await _sbAuthClient
       .from('user_profiles')
-      .select('id,name,role,branches,branch,department_id,role_id')
+      .select('id,name,role,branches,department_id,role_id')
       .eq('auth_id', authData.user.id)
       .maybeSingle();
 
@@ -1333,7 +1333,7 @@ async function doVerifyOtp(){
       department_id: profile.department_id || null,
       role_id      : profile.role_id || null,
       branches     : Array.isArray(profile.branches) ? profile.branches.slice() : ['ALL'],
-      branch       : profile.branch || 'ALL',
+      branch       : (Array.isArray(profile.branches) && profile.branches[0]) || 'ALL',
       email        : authData.user.email,
       // Session tokens replace _pwd. They expire (default 1 hour) but are
       // refreshable. Launched apps should call setSession() then immediately
