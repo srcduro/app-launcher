@@ -1107,6 +1107,17 @@ async function _resolveEmployeeCodeToEmail(code){
   return (data && String(data).trim()) ? String(data).trim().toLowerCase() : null;
 }
 
+// Some employees type their code with a leading "S" or "D" (e.g. a branch/
+// division prefix) even though the actual employee_id stored in
+// user_profiles is just the 5 characters after it. Rather than guessing
+// client-side whether a 6-char S/D-led code is "prefix + real id" or a
+// genuine 5-char id that just happens to start with S/D, we let the
+// database decide: try the code exactly as typed first, and only fall
+// back to the stripped version if that exact lookup finds nothing.
+function _looksLikeStrippablePrefix(code){
+  return /^[SD][A-Z0-9]{5}$/.test((code || '').toUpperCase());
+}
+
 async function doSendOtp(){
   const errEl = document.getElementById('login-err');
   errEl.textContent = '';
@@ -1136,7 +1147,15 @@ async function doSendOtp(){
     errEl.textContent = '⏳ Looking up employee code…';
     errEl.style.color = '#94a3b8';
     try {
-      const resolvedEmail = await _resolveEmployeeCodeToEmail(codeRaw);
+      let resolvedEmail = await _resolveEmployeeCodeToEmail(codeRaw);
+      // Exact code (as typed) didn't match any employee_id — if it's a
+      // 6-character code starting with S/D, try again with that leading
+      // letter stripped, in case it was a prefix rather than part of the
+      // real id. A genuine 5-char id that starts with S/D is unaffected,
+      // since it would have already matched on the first try above.
+      if(!resolvedEmail && _looksLikeStrippablePrefix(codeRaw)){
+        resolvedEmail = await _resolveEmployeeCodeToEmail(codeRaw.slice(1));
+      }
       if(!resolvedEmail){
         errEl.textContent = 'No account found for this employee code. Contact an administrator.';
         errEl.style.color = '';
