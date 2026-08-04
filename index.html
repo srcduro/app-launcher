@@ -612,7 +612,7 @@
 // looking at the new file, or a stale cached/old copy?" without any
 // guesswork. GitHub Pages can take a minute or two to redeploy after a
 // push, and browsers can cache the old file even after that.
-const BUILD_STAMP = 'App Launcher build 2026-07-23 — Purchasing Branch access + cloud-status line removed from login';
+const BUILD_STAMP = 'App Launcher build 2026-08-04 — MM-Admin added as app custodian (parity with Administrator)';
 console.log('[BUILD]', BUILD_STAMP);
 
 // Supabase configuration (same project as Duroply_Sales_MIS_Dashboard.html).
@@ -1461,21 +1461,27 @@ function requireAdmin(action){
 
 // ─── App-custodian gate ──────────────────────────────────────────────
 // Editing, deleting, adding and importing the apps in the launcher is
-// restricted to a SINGLE custodian (S. Roy Choudhury). All other users —
-// including other Admins — can view and launch apps but cannot change the
-// app list. Matched primarily by Supabase auth uid (stable); email is a
-// fallback. This is UI + handler-level enforcement; for hard enforcement,
-// pair it with a row-level-security policy on the apps table.
-const APP_EDITOR_UID   = 'c5b8133c-b14f-4fe3-aa3c-2a748486422d';
-const APP_EDITOR_EMAIL = 'sroychoudhury@duroply.com';
+// restricted to a short allowlist of custodians (currently S. Roy Choudhury
+// and M. Mukherjee). All other users — including other Admins — can view
+// and launch apps but cannot change the app list. Matched primarily by
+// Supabase auth uid (stable); email is a fallback. This is UI + handler-level
+// enforcement; for hard enforcement, pair it with a row-level-security
+// policy on the apps table.
+// 2026-08-04: added mmukherjee@duroply.com (MM-Admin) at S. Roy Choudhury's
+// request, granted parity with the Administrator account. Her auth uid was
+// not available at edit time, so she is matched by email only for now —
+// add her auth uid below once known, for the same stability sroychoudhury's
+// entry already has.
+const APP_EDITOR_UIDS   = ['c5b8133c-b14f-4fe3-aa3c-2a748486422d']; // sroychoudhury@duroply.com
+const APP_EDITOR_EMAILS = ['sroychoudhury@duroply.com', 'mmukherjee@duroply.com'];
 function _isAppEditor(){
   if(!_currentUser) return false;
-  return _currentUser.auth_id === APP_EDITOR_UID
-      || String(_currentUser.email || '').toLowerCase() === APP_EDITOR_EMAIL;
+  return APP_EDITOR_UIDS.includes(_currentUser.auth_id)
+      || APP_EDITOR_EMAILS.includes(String(_currentUser.email || '').toLowerCase());
 }
 function requireAppEditor(action){
   if(!_isAppEditor()){
-    alert('Only S. Roy Choudhury is authorised to ' + action + '.');
+    alert('Only an authorised app custodian can ' + action + '.');
     return false;
   }
   return true;
