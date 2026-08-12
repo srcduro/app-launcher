@@ -612,7 +612,7 @@
 // looking at the new file, or a stale cached/old copy?" without any
 // guesswork. GitHub Pages can take a minute or two to redeploy after a
 // push, and browsers can cache the old file even after that.
-const BUILD_STAMP = 'App Launcher build 2026-08-12 — multi-user-same-email: email login resolves via contact_email; _currentUser now also carries contact_email';
+const BUILD_STAMP = 'App Launcher build 2026-08-04 — MM-Admin added as app custodian (parity with Administrator)';
 console.log('[BUILD]', BUILD_STAMP);
 
 // Supabase configuration (same project as Duroply_Sales_MIS_Dashboard.html).
@@ -1168,48 +1168,7 @@ async function doSendOtp(){
       return;
     }
   } else if(kind === 'email'){
-    // Multi-user-same-email support (2026-08): a typed email is looked up
-    // against user_profiles.contact_email (the real, possibly-shared
-    // address), NOT against Supabase's auth.users.email directly — that
-    // may now be a synthetic, per-account address. resolve_login_by_
-    // contact_email() tells us whether it's unique (and if so, hands back
-    // the one matching auth email to actually sign in with), not found,
-    // or shared by more than one active employee — in which case we never
-    // guess; we ask for the Employee Code instead, same as the message
-    // shown when a code alone doesn't resolve.
-    if(!_sbAuthClient) _sbAuthClient = buildSupabaseAuthClient();
-    if(!_sbAuthClient){
-      errEl.textContent = 'Supabase is not available. Please refresh the page.';
-      return;
-    }
-
-    errEl.textContent = '⏳ Looking up account…';
-    errEl.style.color = '#94a3b8';
-    try {
-      const { data: resolved, error: resolveErr } = await _sbAuthClient
-        .rpc('resolve_login_by_contact_email', { p_email: identRaw.toLowerCase() });
-      if(resolveErr){
-        errEl.textContent = 'Lookup failed: ' + (resolveErr.message || resolveErr);
-        errEl.style.color = '';
-        return;
-      }
-      const status = resolved && resolved.status;
-      if(status === 'ambiguous'){
-        errEl.textContent = 'Please enter your Employee Code — multiple employees are registered with this email address.';
-        errEl.style.color = '';
-        return;
-      }
-      if(status !== 'ok' || !resolved.auth_email){
-        errEl.textContent = 'No account found for this email. Contact an administrator.';
-        errEl.style.color = '';
-        return;
-      }
-      emailRaw = resolved.auth_email;
-    } catch(err){
-      errEl.textContent = 'Lookup failed: ' + (err && err.message ? err.message : err);
-      errEl.style.color = '';
-      return;
-    }
+    emailRaw = identRaw;
   } else {
     errEl.textContent = 'Please enter a valid Employee Code or Email Address.';
     return;
@@ -1363,25 +1322,11 @@ async function doVerifyOtp(){
     }
 
     // Fetch the matching profile row (same query as the old password flow).
-    // contact_email is requested too — it's the user's real, human-facing
-    // address (email is the technical Auth login identifier, which for a
-    // shared-email user is a synthetic, non-deliverable placeholder). If
-    // this runs before 01_migration_contact_email.sql has been applied,
-    // the column won't exist yet — retry without it rather than blocking
-    // every single login on that.
-    let profile, profErr;
-    ({ data: profile, error: profErr } = await _sbAuthClient
+    const { data: profile, error: profErr } = await _sbAuthClient
       .from('user_profiles')
-      .select('id,name,role,branches,department_id,role_id,contact_email')
+      .select('id,name,role,branches,department_id,role_id')
       .eq('auth_id', authData.user.id)
-      .maybeSingle());
-    if(profErr && /column .*contact_email.* does not exist/i.test(profErr.message || '')){
-      ({ data: profile, error: profErr } = await _sbAuthClient
-        .from('user_profiles')
-        .select('id,name,role,branches,department_id,role_id')
-        .eq('auth_id', authData.user.id)
-        .maybeSingle());
-    }
+      .maybeSingle();
 
     if(profErr){
       errEl.textContent = 'Could not load user profile: ' + describeSbError(profErr);
@@ -1408,12 +1353,7 @@ async function doVerifyOtp(){
       role_id      : profile.role_id || null,
       branches     : Array.isArray(profile.branches) ? profile.branches.slice() : ['ALL'],
       branch       : (Array.isArray(profile.branches) && profile.branches[0]) || 'ALL',
-      // email: the technical Auth/login identifier — for a shared-email
-      // user this may be a synthetic "@login.duroply.invalid" placeholder,
-      // never shown to the user. contact_email (when present) is their
-      // real address; falls back to email for anyone not yet migrated.
       email        : authData.user.email,
-      contact_email: profile.contact_email || authData.user.email,
       // Session tokens replace _pwd. They expire (default 1 hour) but are
       // refreshable. Launched apps should call setSession() then immediately
       // proceed — they get the same identity without ever seeing a password.
