@@ -1736,10 +1736,22 @@ function render(){
         <button class="danger" onclick="event.stopPropagation(); deleteApp('${app.id}')">Delete</button>
       </div>` : ''}
       <div class="card-icon">${escapeHtml(app.icon || '📦')}</div>
-      <div class="card-title">${escapeHtml(app.name)}</div>
+      <div class="card-title">${escapeHtml(appDisplayName(app))}</div>
       <div class="card-desc">${escapeHtml(app.description || 'No description')}</div>
     </div>
   `).join('');
+}
+
+// Display-only name corrections for tiles whose launcher_apps row carries a
+// title that no longer describes the app. Applied when a card is drawn, and
+// deliberately NOT when apps are loaded: app.name stays exactly as the table
+// holds it, so the edit dialog cannot write one of these back to the table.
+const APP_NAME_OVERRIDES = {
+  'customer approval system': 'Credit Approval Process'
+};
+function appDisplayName(app){
+  const name = (app.name || '').trim();
+  return APP_NAME_OVERRIDES[name.toLowerCase()] || name;
 }
 
 function escapeHtml(s){
@@ -1988,7 +2000,26 @@ function launchApp(id){
     if(targetUrl && !/^[a-z][a-z0-9+.-]*:/i.test(targetUrl) && !targetUrl.startsWith('//')){
       targetUrl = 'https://' + targetUrl;
     }
-    const w = window.open(targetUrl, '_blank', features);
+
+    // ── SSO handoff for our own apps on other origins 
+    // localStorage is partitioned by origin (see the V148 note further
+    // down), so an app hosted on a different domain — e.g. the Dealer
+    // Management System on Vercel — cannot read the handoff we write to
+    // AUTH_HANDOFF_KEY. The URL fragment is the one channel a browser does
+    // let us use across origins, and unlike a query string it is never sent
+    // to any server, so the tokens stay inside the browser.
+    //
+    // The origin allow-list is the security boundary here: without it every
+    // URL app configured in the launcher — including third-party sites —
+    // would receive the signed-in employee's session tokens.
+    const SSO_TARGET_ORIGINS = ['https://client-47oj.vercel.app'];
+    let wantsSso = false;
+    try { wantsSso = SSO_TARGET_ORIGINS.includes(new URL(targetUrl).origin); } catch(e){ wantsSso = false; }
+
+    // The window must be opened synchronously or the browser stops treating it
+    // as a user gesture and blocks it as a popup. For an SSO target we open a
+    // blank window first and navigate it once the session is in hand.
+    const w = window.open(wantsSso ? 'about:blank' : targetUrl, '_blank', features);
     if(!w){
       alert('Your browser blocked the new window for "' + app.name +
             '". Please allow popups for this site, or open the link manually:\n\n' +
@@ -1996,6 +2027,30 @@ function launchApp(id){
       return;
     }
     _tryMaximize(w);
+
+    if(wantsSso){
+      // Deliberately NOT _currentUser._access_token: that is a snapshot taken
+      // at login, and a refresh token is single-use, so once the destination
+      // app has refreshed the pair that snapshot is dead. Ask the auth client
+      // for the live session at click time instead — getSession() renews it
+      // when it has expired.
+      (async () => {
+        let url = targetUrl;
+        try {
+          const { data } = await _sbAuthClient.auth.getSession();
+          const s = data && data.session;
+          if(s && s.access_token && s.refresh_token){
+            url += (url.includes('#') ? '&' : '#') +
+              'access_token='  + encodeURIComponent(s.access_token) +
+              '&refresh_token=' + encodeURIComponent(s.refresh_token);
+          }
+        } catch(e){
+          // Fall through with the plain URL — the destination will ask for
+          // credentials itself rather than the launch failing outright.
+        }
+        try { w.location.replace(url); } catch(e){ w.location = url; }
+      })();
+    }
     return;
   }
 
