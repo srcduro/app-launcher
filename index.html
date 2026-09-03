@@ -218,13 +218,19 @@
   .admin-only.hidden { display: none; }
 
   .grid {
-    display: grid;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
     /* Round icon tiles need a bit more room per column than the old
        rectangular cards did, and breathing space between them since
        there's no card border to separate neighbours visually. */
-    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
-    gap: 22px 14px;
-    justify-items: center;
+    gap: 22px 18px;
+  }
+  .grid .card {
+    /* Fixed-ish tile width so wrapped rows line up evenly, while still
+       letting the flex container centre a lone tile (or a short last
+       row) on the screen instead of pinning it to the left edge. */
+    width: 104px;
   }
   /* Icons zoom in (scaled down + shifted up toward the tab bar, faded
      out) and animate to full size/position/opacity on insertion. Each
@@ -249,6 +255,7 @@
     cursor: pointer;
     text-align: center;
     position: relative;
+    z-index: 1;
     padding-top: 6px;
     opacity: 0;
     transform: scale(0.15) translateY(-160px);
@@ -271,7 +278,8 @@
     border-color: var(--tab-color);
   }
   .card-title {
-    font-size: 12px; font-weight: 600;
+    font-family: Calibri, "Segoe UI", -apple-system, sans-serif;
+    font-size: 14px; font-weight: 800;
     color: #1c1c1a;
     line-height: 1.25;
     max-width: 100px;
@@ -390,6 +398,7 @@
     cursor: pointer;
     border-radius: 999px;             /* fully rounded pill */
     position: relative;
+    z-index: 1;
     white-space: nowrap;
     transition: background 0.15s, color 0.15s, transform 0.05s;
   }
@@ -488,7 +497,7 @@
        by drawConnectors() every time render() draws the app grid. Sits
        above the watermark (z-index -1) and below nothing in particular —
        pointer-events:none so it never blocks clicks on tabs/cards. -->
-  <svg id="connectors" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:1; overflow:visible;"></svg>
+  <svg id="connectors" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:0; overflow:visible;"></svg>
 
   <header>
     <div>
